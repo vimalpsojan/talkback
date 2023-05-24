@@ -55,6 +55,7 @@ dependencies {
 
     implementation 'androidx.wear:wear:1.2.0-rc01'
     implementation 'com.google.android.support:wearable:2.8.1'
+    compileOnly 'com.google.android.wearable:wearable:2.8.1'
 
     // UI understanding
     implementation 'joda-time:joda-time:2.9.9'
