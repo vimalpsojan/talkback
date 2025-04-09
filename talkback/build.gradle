@@ -4,9 +4,9 @@ apply from: "../shared.gradle"
 dependencies {
     implementation project(':proguard')
     implementation project(':utils')
-    implementation project(':brailleime')
-    implementation project(':brailleinterfaces')
-    implementation project(':brailledisplay')
+//    implementation project(':brailleime')
+//    implementation project(':brailleinterfaces')
+//    implementation project(':brailledisplay')
 }
 
 android {

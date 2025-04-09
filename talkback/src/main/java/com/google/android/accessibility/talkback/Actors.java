@@ -153,7 +153,6 @@ class Actors {
   private final GeminiActor geminiActor;
   private final ServiceFlagRequester serviceFlagRequester;
   private final FormFactorUtils formFactorUtils;
-  private final BrailleDisplayActor brailleDisplayActor;
 
   //////////////////////////////////////////////////////////////////////////
   // Construction methods
@@ -188,8 +187,7 @@ class Actors {
       ImageCaptioner imageCaptioner,
       UniversalSearchActor universalSearchActor,
       GeminiActor geminiActor,
-      ServiceFlagRequester serviceFlagRequester,
-      BrailleDisplayActor brailleDisplayActor) {
+      ServiceFlagRequester serviceFlagRequester) {
     this.context = context;
     this.analytics = analytics;
     this.accessibilityFocusMonitor = accessibilityFocusMonitor;
@@ -220,7 +218,6 @@ class Actors {
     this.universalSearchActor = universalSearchActor;
     this.geminiActor = geminiActor;
     this.serviceFlagRequester = serviceFlagRequester;
-    this.brailleDisplayActor = brailleDisplayActor;
 
     this.formFactorUtils = FormFactorUtils.getInstance();
     actorState =
@@ -1035,7 +1032,6 @@ class Actors {
     if (brailleDisplay != null) {
       switch (brailleDisplay.action()) {
         case TOGGLE_BRAILLE_DISPLAY_ON_OR_OFF:
-          brailleDisplayActor.switchBrailleDisplayOnOrOff();
           break;
         default:
           // fall through
