@@ -15,6 +15,7 @@
  */
 package com.google.android.accessibility.talkback.actor.voicecommands;
 
+import static com.google.android.accessibility.talkback.Feedback.UniversalSearch.Action.TOGGLE_SEARCH;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_ALL_APPS;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_BACK;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_BRIGHTEN_SCREEN;
@@ -38,12 +39,53 @@ import static com.google.android.accessibility.talkback.Interpretation.VoiceComm
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_REPEAT_SEARCH;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_SELECT_ALL;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_SHOW_COMMAND_LIST;
-import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_START_AT_NEXT;
+import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_START_AT_CURSOR;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_START_AT_TOP;
 import static com.google.android.accessibility.talkback.Interpretation.VoiceCommand.Action.VOICE_COMMAND_START_SELECT;
 import static com.google.android.accessibility.talkback.actor.voicecommands.SpeechRecognizerActor.RECOGNITION_SPEECH_DELAY_MS;
 import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_RECOGNIZED;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_ALL_APPS;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_ASSISTANT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_BACK;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_COPY;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_COPY_LAST_UTTERANCE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_CUSTOM_ACTION;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_CUT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_DELETE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_END_SELECT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_FIND;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_FIRST;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_GEMINI;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_GRANULARITY;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_HELP;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_HIDE_SCREEN;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_HOME;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_INSERT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_LABEL;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_LANGUAGE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_LAST;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_NEXT_CONTROL;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_NEXT_HEADING;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_NEXT_LANDMARK;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_NEXT_LINK;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_NOTIFICATION;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_PASTE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_QUICK_SETTING;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_QUIT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_READ_FROM_CURSOR;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_READ_FROM_TOP;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_RECENT_APPS;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_SCREEN_SEARCH;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_SELECT_ALL;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_SHOW_SCREEN;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_SPEECH_RATE_DECREASE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_SPEECH_RATE_INCREASE;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_START_SELECT;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_TALKBACK_SETTING;
+import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_TYPE_VERBOSITY;
 import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VOICE_COMMAND_UNRECOGNIZED;
+import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.CUSTOM_ACTION;
+import static com.google.android.accessibility.talkback.contextmenu.ListMenuManager.MenuId.LANGUAGE;
 import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
 
 import android.content.Intent;
@@ -57,14 +99,17 @@ import com.google.android.accessibility.talkback.Pipeline;
 import com.google.android.accessibility.talkback.R;
 import com.google.android.accessibility.talkback.TalkBackService;
 import com.google.android.accessibility.talkback.actor.DimScreenActor;
+import com.google.android.accessibility.talkback.actor.gemini.GeminiConfiguration;
 import com.google.android.accessibility.talkback.analytics.TalkBackAnalytics;
+import com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.VoiceCommandTypeId;
 import com.google.android.accessibility.talkback.contextmenu.ContextMenuItem;
 import com.google.android.accessibility.talkback.contextmenu.ListMenuManager;
 import com.google.android.accessibility.talkback.focusmanagement.AccessibilityFocusMonitor;
-import com.google.android.accessibility.talkback.menurules.RuleCustomAction;
+import com.google.android.accessibility.talkback.menurules.RuleAction;
 import com.google.android.accessibility.talkback.selector.SelectorController;
 import com.google.android.accessibility.talkback.selector.SelectorController.Setting;
 import com.google.android.accessibility.utils.FeatureSupport;
+import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.LocaleUtils;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.Role;
@@ -74,6 +119,7 @@ import com.google.android.accessibility.utils.WebInterfaceUtils;
 import com.google.android.accessibility.utils.input.CursorGranularity;
 import com.google.android.accessibility.utils.output.FeedbackItem;
 import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions;
+import com.google.android.accessibility.utils.screencapture.ScreenshotCapture;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +136,7 @@ public class VoiceCommandProcessor {
   private Pipeline.InterpretationReceiver interpretationReceiver;
   private final AccessibilityFocusMonitor accessibilityFocusMonitor;
   private ListMenuManager menuManager;
-  private final SelectorController selectorController;
+  private SelectorController selectorController;
   private ActorState actorState;
   private final TalkBackAnalytics analytics;
 
@@ -234,10 +280,24 @@ public class VoiceCommandProcessor {
     echoNotRecognizedTextEnabled = enable;
   }
 
+  public void setSelectorController(SelectorController selectorController) {
+    this.selectorController = selectorController;
+  }
+
   private void dimScreenVoiceCommand(EventId eventId) {
     if (DimScreenActor.isSupported(service)) {
       sendInterpretation(VOICE_COMMAND_DIM_SCREEN, eventId);
     }
+  }
+
+  private void performGeminiCommand(EventId eventId, String prompt) {
+    // TODO: Verify takeScreenshot by faking ScreenshotCapture.
+    ScreenshotCapture.takeScreenshot(
+        service,
+        (screenCapture, isFormatSupported) -> {
+          pipeline.returnFeedback(
+              eventId, Feedback.geminiRequest(/* requestId= */ -1, prompt, screenCapture));
+        });
   }
 
   /* Returns true if the recognized string is one of the voice commands. */
@@ -248,6 +308,19 @@ public class VoiceCommandProcessor {
     LogUtils.i(LOG_TAG, "handleSpeechCommand() command=\"%s\"", command);
     EventId eventId = EVENT_ID_UNTRACKED;
 
+    // Gemini voice command
+    // command format: Gemini
+    // TODO: When the code structure allows to test taking screenshot, add unit tests
+    // of Gemini voice command.
+    if (GeminiConfiguration.isGeminiVoiceCommandEnabled(service)
+        && startsWith(command, R.string.voice_commands_gemini)) {
+      performGeminiCommand(
+          eventId, command.substring(service.getString(R.string.voice_commands_gemini).length()));
+      pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_GEMINI);
+      return true;
+    }
+
     @Nullable AccessibilityNodeInfoCompat node = null;
     // select all voice command
     // command format: Select all
@@ -256,7 +329,7 @@ public class VoiceCommandProcessor {
       if (node != null) {
         sendInterpretation(VOICE_COMMAND_SELECT_ALL, node, eventId);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SELECT_ALL);
       return true;
     }
 
@@ -264,7 +337,7 @@ public class VoiceCommandProcessor {
     // command format: Hide screen,
     if (equals(command, R.string.shortcut_enable_dimming)) {
       dimScreenVoiceCommand(eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_HIDE_SCREEN);
       return true;
     }
 
@@ -278,17 +351,17 @@ public class VoiceCommandProcessor {
         // command-pattern-matching.
         sendInterpretation(VOICE_COMMAND_END_SELECT, node, eventId);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_END_SELECT);
       return true;
     }
 
     // screen search voice command
     // command format: screen search, search on screen
-    if (!FeatureSupport.isWatch(service)
+    if (!FormFactorUtils.getInstance().isAndroidWear()
         && (equals(command, R.string.voice_commands_screen_search)
             || equals(command, R.string.voice_commands_search_on_screen))) {
-      service.getUniversalSearchManager().toggleSearch(eventId);
-      handleVoiceCommandRecognized();
+      pipeline.returnFeedback(eventId, Feedback.universalSearch(TOGGLE_SEARCH));
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SCREEN_SEARCH);
       return true;
     }
 
@@ -300,7 +373,7 @@ public class VoiceCommandProcessor {
       if (node != null) {
         sendInterpretation(VOICE_COMMAND_START_SELECT, node, eventId);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_START_SELECT);
       return true;
     }
 
@@ -309,17 +382,17 @@ public class VoiceCommandProcessor {
     int actionCommand = equals(command, actionsCommandResArray);
     if (actionCommand >= 0) {
       node = accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ true);
-      RuleCustomAction ruleCustomAction = new RuleCustomAction(pipeline, actorState, analytics);
+      RuleAction ruleAction =
+          new RuleAction(pipeline, actorState, accessibilityFocusMonitor, analytics);
       List<ContextMenuItem> menuItems =
-          ruleCustomAction.getMenuItemsForNode(service, node, /* includeAncestors= */ true);
-      if (node == null || menuItems.size() == 0) {
-        menuManager.showMenu(
-            R.id.custom_action_menu, eventId, R.string.voice_commands_no_actions_feedback);
+          ruleAction.getMenuItemsForNode(service, node, /* includeAncestors= */ true);
+      if (node == null || menuItems.isEmpty()) {
+        menuManager.showMenu(CUSTOM_ACTION, eventId, R.string.voice_commands_no_actions_feedback);
       } else {
-        menuManager.showMenu(R.id.custom_action_menu, eventId);
+        menuManager.showMenu(CUSTOM_ACTION, eventId);
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_CUSTOM_ACTION);
       return true;
     }
 
@@ -340,7 +413,7 @@ public class VoiceCommandProcessor {
         speakDelayed(service.getString(R.string.voice_commands_no_next_heading_feedback));
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_NEXT_HEADING);
       return true;
     }
 
@@ -357,7 +430,7 @@ public class VoiceCommandProcessor {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
         speakDelayed(service.getString(R.string.voice_commands_no_next_control_feedback));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_NEXT_CONTROL);
       return true;
     }
 
@@ -374,7 +447,7 @@ public class VoiceCommandProcessor {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
         speakDelayed(service.getString(R.string.voice_commands_no_next_link_feedback));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_NEXT_LINK);
       return true;
     }
 
@@ -398,7 +471,7 @@ public class VoiceCommandProcessor {
         selectorController.changeVerbosity(eventId, verbosityCommandIndex);
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_VERBOSITY);
       return true;
     }
 
@@ -415,7 +488,7 @@ public class VoiceCommandProcessor {
         // TODO Apply selector-changes to pipeline on VoiceCommandProcessor.
         selectorController.selectSetting(setting, /* showOverlay= */ false);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_GRANULARITY);
       return true;
     }
 
@@ -425,13 +498,13 @@ public class VoiceCommandProcessor {
       node = accessibilityFocusMonitor.getAccessibilityFocus(false);
 
       if (!WebInterfaceUtils.supportsWebActions(node)
-          || sendInterpretation(
+          || !sendInterpretation(
               VOICE_COMMAND_NEXT_GRANULARITY, CursorGranularity.WEB_LANDMARK, eventId)) {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
         speakDelayed(service.getString(R.string.voice_commands_no_next_landmark_feedback));
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_NEXT_LANDMARK);
       return true;
     }
 
@@ -442,7 +515,7 @@ public class VoiceCommandProcessor {
       if (DimScreenActor.isSupported(service)) {
         sendInterpretation(VOICE_COMMAND_BRIGHTEN_SCREEN, eventId);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SHOW_SCREEN);
       return true;
     }
 
@@ -451,7 +524,7 @@ public class VoiceCommandProcessor {
     if (equals(command, R.string.voice_commands_back)
         || equals(command, R.string.voice_commands_go_back)) {
       sendInterpretation(VOICE_COMMAND_BACK, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_BACK);
       return true;
     }
 
@@ -459,14 +532,14 @@ public class VoiceCommandProcessor {
     // command format: increase speech rate
     if (equals(command, R.string.voice_commands_increase_speech_rate)) {
       selectorController.changeSpeechRate(eventId, /* isIncrease= */ true);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SPEECH_RATE_INCREASE);
       return true;
     }
     // talk slower voice command
     // command format: decrease speech rate
     if (equals(command, R.string.voice_commands_decrease_speech_rate)) {
       selectorController.changeSpeechRate(eventId, /* isIncrease= */ false);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SPEECH_RATE_DECREASE);
       return true;
     }
 
@@ -486,7 +559,7 @@ public class VoiceCommandProcessor {
       if (!found) {
         speakDelayed(service.getString(R.string.msg_no_matches));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_FIND);
       return true;
     }
 
@@ -501,7 +574,7 @@ public class VoiceCommandProcessor {
           sendInterpretation(VOICE_COMMAND_INSERT, node, inputText, eventId);
         }
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_INSERT);
       return true;
     }
 
@@ -521,16 +594,16 @@ public class VoiceCommandProcessor {
           speakDelayed(service.getString(R.string.voice_commands_cannot_label_feedback));
         }
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_LABEL);
       return true;
     }
 
-    // read from next voice command
-    // command format: Read from next item, Read from next
+    // read from cursor voice command
+    // command format: Read from cursor position, Read from cursor
     int readFromNextCommand = startsWith(command, readFromNextCommandResArray);
     if (readFromNextCommand >= 0) {
-      sendInterpretation(VOICE_COMMAND_START_AT_NEXT, eventId);
-      handleVoiceCommandRecognized();
+      sendInterpretation(VOICE_COMMAND_START_AT_CURSOR, eventId);
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_READ_FROM_CURSOR);
       return true;
     }
 
@@ -538,7 +611,7 @@ public class VoiceCommandProcessor {
     // command format: Read from top
     if (startsWith(command, R.string.shortcut_read_from_top)) {
       sendInterpretation(VOICE_COMMAND_START_AT_TOP, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_READ_FROM_TOP);
       return true;
     }
 
@@ -546,7 +619,7 @@ public class VoiceCommandProcessor {
     // command format: Copy last spoken phrase
     if (startsWith(command, R.string.title_copy_last_spoken_phrase)) {
       sendInterpretation(VOICE_COMMAND_COPY_LAST_SPOKEN_UTTERANCE, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_COPY_LAST_UTTERANCE);
       return true;
     }
 
@@ -555,7 +628,7 @@ public class VoiceCommandProcessor {
     int quickSettingCommand = contains(command, quickSettingCommandResArray);
     if (quickSettingCommand >= 0) {
       sendInterpretation(VOICE_COMMAND_QUICK_SETTINGS, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_QUICK_SETTING);
       return true;
     }
 
@@ -566,7 +639,7 @@ public class VoiceCommandProcessor {
       Intent intent = new Intent(service, TalkBackPreferencesActivity.class);
       intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       service.startActivity(intent);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_TALKBACK_SETTING);
       return true;
     }
 
@@ -574,7 +647,7 @@ public class VoiceCommandProcessor {
     // command format: * dim *, * darken *
     if (contains(command, hideScreenCommandResArray) >= 0) {
       dimScreenVoiceCommand(eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_HIDE_SCREEN);
       return true;
     }
 
@@ -585,7 +658,7 @@ public class VoiceCommandProcessor {
       if (node != null) {
         sendInterpretation(VOICE_COMMAND_COPY, node, eventId);
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_COPY);
       return true;
     }
 
@@ -597,7 +670,7 @@ public class VoiceCommandProcessor {
         sendInterpretation(VOICE_COMMAND_PASTE, node, eventId);
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_PASTE);
       return true;
     }
 
@@ -609,7 +682,7 @@ public class VoiceCommandProcessor {
         sendInterpretation(VOICE_COMMAND_DELETE, node, eventId);
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_DELETE);
       return true;
     }
 
@@ -621,7 +694,7 @@ public class VoiceCommandProcessor {
       if (!result) {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_FIRST);
       return true;
     }
 
@@ -633,16 +706,16 @@ public class VoiceCommandProcessor {
       if (!result) {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_LAST);
       return true;
     }
 
     // language voice command
     // command format: * language *, * languages *
-    int languageCommmand = contains(command, languageCommandResArray);
-    if (languageCommmand >= 0) {
-      menuManager.showMenu(R.menu.language_menu, eventId);
-      handleVoiceCommandRecognized();
+    int languageCommand = contains(command, languageCommandResArray);
+    if (languageCommand >= 0) {
+      menuManager.showMenu(LANGUAGE, eventId);
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_LANGUAGE);
       return true;
     }
 
@@ -655,21 +728,21 @@ public class VoiceCommandProcessor {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_NOTIFICATION);
       return true;
     }
 
     // all apps command
     // command format: * apps *
     if (containsWord(command, R.string.voice_commands_apps)
-        && FeatureSupport.supportSystemActions(service)
+        && FeatureSupport.supportGetSystemActions(service)
         && !containsWord(command, R.string.voice_commands_recent)
         && !containsWord(command, R.string.voice_commands_recents)) {
       boolean result = sendInterpretation(VOICE_COMMAND_ALL_APPS, eventId);
       if (!result) {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_ALL_APPS);
       return true;
     }
 
@@ -681,7 +754,7 @@ public class VoiceCommandProcessor {
       if (!result) {
         pipeline.returnFeedback(eventId, Feedback.sound(R.raw.complete));
       }
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_RECENT_APPS);
       return true;
     }
 
@@ -690,7 +763,7 @@ public class VoiceCommandProcessor {
     if (containsWord(command, R.string.voice_commands_assistant)) {
       service.startActivity(
           new Intent(Intent.ACTION_VOICE_COMMAND).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_ASSISTANT);
       return true;
     }
 
@@ -699,7 +772,7 @@ public class VoiceCommandProcessor {
     if (containsWord(command, R.string.voice_commands_home)
         || containsWord(command, R.string.voice_commands_desktop)) {
       sendInterpretation(VOICE_COMMAND_HOME, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_HOME);
       return true;
     }
 
@@ -711,7 +784,7 @@ public class VoiceCommandProcessor {
         || containsWord(command, R.string.voice_commands_pause)
         || equals(command, R.string.voice_commands_nevermind)
         || equals(command, R.string.voice_commands_shut_up)) {
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_QUIT);
       return true;
     }
 
@@ -719,7 +792,7 @@ public class VoiceCommandProcessor {
     // command format: * faster *, increase speech rate
     if (containsWord(command, R.string.voice_commands_faster)) {
       selectorController.changeSpeechRate(eventId, /* isIncrease= */ true);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SPEECH_RATE_INCREASE);
       return true;
     }
 
@@ -727,7 +800,7 @@ public class VoiceCommandProcessor {
     // command format: * slower *, decrease speech rate
     if (containsWord(command, R.string.voice_commands_slower)) {
       selectorController.changeSpeechRate(eventId, /* isIncrease= */ false);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_SPEECH_RATE_DECREASE);
       return true;
     }
 
@@ -739,7 +812,7 @@ public class VoiceCommandProcessor {
         sendInterpretation(VOICE_COMMAND_CUT, node, eventId);
       }
 
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_CUT);
       return true;
     }
 
@@ -748,7 +821,7 @@ public class VoiceCommandProcessor {
     if (containsAll(command, R.string.voice_commands_what, R.string.voice_commands_say)
         || containsWord(command, R.string.title_pref_help)) {
       sendInterpretation(VOICE_COMMAND_SHOW_COMMAND_LIST, eventId);
-      handleVoiceCommandRecognized();
+      handleVoiceCommandRecognized(VOICE_COMMAND_TYPE_HELP);
       return true;
     }
 
@@ -777,8 +850,9 @@ public class VoiceCommandProcessor {
     return commandList;
   }
 
-  private void handleVoiceCommandRecognized() {
+  private void handleVoiceCommandRecognized(@VoiceCommandTypeId int type) {
     analytics.onVoiceCommandEvent(VOICE_COMMAND_RECOGNIZED);
+    analytics.onVoiceCommandType(type);
   }
 
   private boolean containsAll(String command, int stringResId1, int stringResId2) {
@@ -858,6 +932,7 @@ public class VoiceCommandProcessor {
   }
 
   private @Nullable AccessibilityNodeInfoCompat getEditTextFocus() {
+    // TODO: Apply the input focus node if the accessibility focus is on IME window.
     @Nullable AccessibilityNodeInfoCompat node =
         accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ true);
     if (Role.getRole(node) == Role.ROLE_EDIT_TEXT) {

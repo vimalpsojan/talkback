@@ -29,8 +29,8 @@ import com.google.android.accessibility.talkback.TalkBackService;
 import com.google.android.accessibility.talkback.actor.DimScreenActor;
 import com.google.android.accessibility.talkback.contextmenu.ContextMenuItem.DeferredType;
 import com.google.android.accessibility.talkback.menurules.NodeMenuRuleProcessor;
-import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
 import com.google.android.accessibility.utils.FeatureSupport;
+import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.SettingsUtils;
 import com.google.android.accessibility.utils.SharedPreferencesUtils;
 import com.google.android.accessibility.utils.monitor.ScreenMonitor;
@@ -58,19 +58,21 @@ public class TalkbackMenuProcessor {
    * ORDER_VOICE_COMMANDS = 21;
    * ORDER_TALKBACK_SETTINGS = 22;
    * ORDER_TTS_SETTINGS = 23;
-   * ORDER_SUSPEND_TALKBACK = 24;
+   * ORDER_BRAILLE_DISPLAY_SETTINGS = 25;
    */
-  private static final int ORDER_ACTIONS = 1;
+  private static final int ORDER_TYPO_SUGGESTIONS = 1;
+  private static final int ORDER_ACTIONS = 2;
   private static final int ORDER_LINKS = 3;
   private static final int ORDER_PAGE_NAVIGATION = 4;
   private static final int ORDER_LABELS = 5;
-  private static final int ORDER_NAVIGATION = 7;
+  private static final int ORDER_NAVIGATION = 6;
 
   private static final int ORDER_LANGUAGES = 14;
 
   private static final int ORDER_SHOW_HIDE_SCREEN = 20;
 
-  private static final int ORDER_SYSTEM_ACTIONS = 25;
+  private static final int ORDER_SYSTEM_ACTIONS = 24;
+
   public static final int ORDER_IMAGE_CAPTION = 26;
 
   private final TalkBackService service;
@@ -78,6 +80,7 @@ public class TalkbackMenuProcessor {
   private final Pipeline.FeedbackReturner pipeline;
   private final NodeMenuRuleProcessor nodeMenuRuleProcessor;
   private final AccessibilityNodeInfoCompat currentNode;
+  private final FormFactorUtils formFactorUtils;
 
   // TODO: Reduces dependency on TalkBackService to dependency on Context.
   public TalkbackMenuProcessor(
@@ -91,6 +94,7 @@ public class TalkbackMenuProcessor {
     this.pipeline = pipeline;
     this.nodeMenuRuleProcessor = nodeMenuRuleProcessor;
     this.currentNode = currentNode;
+    formFactorUtils = FormFactorUtils.getInstance();
   }
 
   /**
@@ -103,6 +107,12 @@ public class TalkbackMenuProcessor {
     // Apply attributes to menu items.
     SharedPreferences prefs = SharedPreferencesUtils.getSharedPreferences(service);
 
+    // Typo suggestions
+    addItemOrSubMenuForCurrentNode(
+        menu,
+        R.id.typo_suggestions_menu,
+        R.string.title_edittext_typo_suggestions,
+        ORDER_TYPO_SUGGESTIONS);
     // Custom Action
     addItemOrSubMenuForCurrentNode(
         menu, R.id.custom_action_menu, R.string.title_custom_action, ORDER_ACTIONS);
@@ -182,13 +192,6 @@ public class TalkbackMenuProcessor {
   private void addContextMenuXMLMenu(ContextMenu menu) {
     new MenuInflater(service).inflate(R.menu.context_menu, menu);
 
-    if (FeatureSupport.hasAccessibilityShortcut(service)
-        || !showMenuItem(
-            R.string.pref_show_context_menu_pause_feedback_setting_key,
-            R.bool.pref_show_context_menu_pause_feedback_default)) {
-      menu.removeItem(R.id.pause_feedback);
-    }
-
     // Removes talkback TTS settings if phone is locked, Setup Wizard doesn't complete or uncheck
     // show item.
     if (ScreenMonitor.isDeviceLocked(service)
@@ -230,17 +233,18 @@ public class TalkbackMenuProcessor {
     }
 
     // Removes screen search if this is watch or uncheck show item.
-    if (FeatureSupport.isWatch(service)
+    if (formFactorUtils.isAndroidWear()
         || !showMenuItem(
             R.string.pref_show_context_menu_find_on_screen_setting_key,
             R.bool.pref_show_context_menu_find_on_screen_default)) {
       menu.removeItem(R.id.screen_search);
     }
 
-    // Removes voice command if phone is locked, Setup Wizard doesn't complete or uncheck
-    // show item.
+    // Removes voice command if phone is locked, Setup Wizard doesn't complete or uncheck show item,
+    // or in the Wear build.
     if (ScreenMonitor.isDeviceLocked(service)
         || !SettingsUtils.allowLinksOutOfSettings(service)
+        || formFactorUtils.isAndroidWear()
         || !showMenuItem(
             R.string.pref_show_context_menu_voice_commands_setting_key,
             R.bool.pref_show_context_menu_voice_commands_default)) {
@@ -255,6 +259,17 @@ public class TalkbackMenuProcessor {
             R.string.pref_show_context_menu_talkback_settings_setting_key,
             R.bool.pref_show_context_menu_talkback_settings_default)) {
       menu.removeItem(R.id.talkback_settings);
+    }
+
+    // Removes braille display settings if braille display isn't supported, phone is locked, Setup
+    // Wizard isn't completed or the preference of showing item is unchecked.
+    if (!FeatureSupport.supportBrailleDisplay(service)
+        || ScreenMonitor.isDeviceLocked(service)
+        || !SettingsUtils.allowLinksOutOfSettings(service)
+        || !showMenuItem(
+            R.string.pref_show_context_menu_braille_display_settings_setting_key,
+            R.bool.pref_show_context_menu_braille_display_settings_default)) {
+      menu.removeItem(R.id.braille_display_settings);
     }
 
     if (ScreenMonitor.isDeviceLocked(service)
@@ -352,7 +367,7 @@ public class TalkbackMenuProcessor {
     if (currentNode == null) {
       return;
     }
-    AccessibilityNodeInfoCompat node = AccessibilityNodeInfoUtils.obtain(currentNode);
+    AccessibilityNodeInfoCompat node = currentNode;
     nodeMenuRuleProcessor.prepareTalkbackMenuForNode(menu, node, itemId, titleId, itemOrder);
   }
 
@@ -427,7 +442,7 @@ public class TalkbackMenuProcessor {
       return;
     }
 
-    if (!FeatureSupport.supportSystemActions(service)
+    if (!FeatureSupport.supportGetSystemActions(service)
         || ScreenMonitor.isDeviceLocked(service)
         || !SettingsUtils.allowLinksOutOfSettings(service)) {
       return;

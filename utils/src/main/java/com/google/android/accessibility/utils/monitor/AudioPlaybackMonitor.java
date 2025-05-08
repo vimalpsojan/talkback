@@ -16,14 +16,13 @@
 
 package com.google.android.accessibility.utils.monitor;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.AudioManager.AudioPlaybackCallback;
 import android.media.AudioPlaybackConfiguration;
-import android.os.Build;
 import com.google.android.accessibility.utils.BuildVersionUtils;
+import java.util.ArrayList;
 import java.util.List;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -32,7 +31,7 @@ public class AudioPlaybackMonitor {
 
   /** Interface for AudioPlayback */
   public interface AudioPlaybackStateChangedListener {
-    void onAudioPlaybackActivated();
+    void onAudioPlaybackActivated(List<AudioPlaybackConfiguration> configs);
   }
 
   /**
@@ -45,7 +44,9 @@ public class AudioPlaybackMonitor {
     USAGE_ASSISTANCE_NAVIGATION_GUIDANCE(
         AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE, "Navigation Guidance"),
     USAGE_MEDIA(AudioAttributes.USAGE_MEDIA, "Usage Media"),
-    USAGE_ASSISTANT(AudioAttributes.USAGE_ASSISTANT, "Usage Assistant");
+    USAGE_GAME(AudioAttributes.USAGE_GAME, "Usage Game"),
+    USAGE_ASSISTANT(AudioAttributes.USAGE_ASSISTANT, "Usage Assistant"),
+    USAGE_ALARM(AudioAttributes.USAGE_ALARM, "Usage Alarm");
 
     private final int id;
     private final String name;
@@ -66,12 +67,11 @@ public class AudioPlaybackMonitor {
 
   private final @Nullable Context context;
   private @Nullable AudioManager audioManager;
-  @Nullable private final AudioPlaybackCallback audioPlaybackCallback;
+  private final @Nullable AudioPlaybackCallback audioPlaybackCallback;
 
-  @Nullable private AudioPlaybackStateChangedListener listener;
+  private @Nullable AudioPlaybackStateChangedListener listener;
   private boolean isPlaying = false;
 
-  @TargetApi(Build.VERSION_CODES.O)
   public AudioPlaybackMonitor(Context context) {
     this.context = context;
     if (BuildVersionUtils.isAtLeastO()) {
@@ -80,9 +80,11 @@ public class AudioPlaybackMonitor {
             @Override
             public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
               super.onPlaybackConfigChanged(configs);
-              final boolean isPlaying = containsAudioPlaybackSources(configs);
+              List<AudioPlaybackConfiguration> filteredConfigs =
+                  extractsAudioPlaybackSources(configs);
+              final boolean isPlaying = !filteredConfigs.isEmpty();
               if (listener != null && !AudioPlaybackMonitor.this.isPlaying && isPlaying) {
-                listener.onAudioPlaybackActivated();
+                listener.onAudioPlaybackActivated(filteredConfigs);
               }
               AudioPlaybackMonitor.this.isPlaying = isPlaying;
             }
@@ -124,7 +126,6 @@ public class AudioPlaybackMonitor {
     return false;
   }
 
-  @TargetApi(Build.VERSION_CODES.O)
   public void onResumeInfrastructure() {
     if (audioPlaybackCallback != null) {
       isPlaying = false;
@@ -136,7 +137,6 @@ public class AudioPlaybackMonitor {
     }
   }
 
-  @TargetApi(Build.VERSION_CODES.O)
   public void onSuspendInfrastructure() {
     if (audioPlaybackCallback != null) {
       @Nullable AudioManager audioManagerNow = getAudioManager();
@@ -167,20 +167,19 @@ public class AudioPlaybackMonitor {
     return result;
   }
 
-  @TargetApi(Build.VERSION_CODES.O)
-  private static boolean containsAudioPlaybackSources(List<AudioPlaybackConfiguration> configs) {
-    if (configs == null) {
-      return false;
-    }
-    // Try to find a target audio source in the playback configurations.
+  /** Returns the activated audio playback sources that are desired. */
+  private static List<AudioPlaybackConfiguration> extractsAudioPlaybackSources(
+      List<AudioPlaybackConfiguration> configs) {
+    // Collects the audio playback sources.
+    List<AudioPlaybackConfiguration> list = new ArrayList<>();
     for (PlaybackSource source : PlaybackSource.values()) {
       int sourceId = source.getId();
       for (AudioPlaybackConfiguration config : configs) {
         if (sourceId == config.getAudioAttributes().getUsage()) {
-          return true;
+          list.add(config);
         }
       }
     }
-    return false;
+    return list;
   }
 }

@@ -16,7 +16,6 @@
 
 package com.google.android.accessibility.brailleime.input;
 
-import android.content.res.Configuration;
 import androidx.annotation.IntDef;
 import com.google.android.accessibility.braille.interfaces.BrailleCharacter;
 import java.lang.annotation.Retention;
@@ -35,16 +34,25 @@ import javax.annotation.Nullable;
  * </ul>
  */
 class BrailleInputPlaneResult {
-  @IntDef({TYPE_TAP, TYPE_SWIPE, TYPE_CALIBRATION})
+  @IntDef({
+    TYPE_TAP,
+    TYPE_SWIPE,
+    TYPE_CALIBRATION,
+    TYPE_HOLD,
+    TYPE_HOLD_AND_SWIPE,
+  })
   @Retention(RetentionPolicy.SOURCE)
   public @interface Type {}
 
   static final int TYPE_TAP = 0;
   static final int TYPE_SWIPE = 1;
   static final int TYPE_CALIBRATION = 2;
+  static final int TYPE_HOLD = 3;
+  static final int TYPE_HOLD_AND_SWIPE = 4;
 
   @Type int type;
-  @Nullable BrailleCharacter brailleCharacter;
+  @Nullable BrailleCharacter releasedBrailleCharacter;
+  @Nullable BrailleCharacter heldBrailleCharacter;
   @Nullable Swipe swipe;
   int pointersHeldCount;
   boolean isLeft;
@@ -54,7 +62,7 @@ class BrailleInputPlaneResult {
   static BrailleInputPlaneResult createTapAndRelease(BrailleCharacter brailleCharacter) {
     BrailleInputPlaneResult result = new BrailleInputPlaneResult();
     result.type = TYPE_TAP;
-    result.brailleCharacter = brailleCharacter;
+    result.releasedBrailleCharacter = brailleCharacter;
     return result;
   }
 
@@ -66,27 +74,26 @@ class BrailleInputPlaneResult {
     return result;
   }
 
-  static BrailleInputPlaneResult createSwipeForPhone(
-      Swipe swipe, int orientation, boolean isTableTopMode) {
-    Swipe reorientedSwipe =
-        (orientation == Configuration.ORIENTATION_PORTRAIT)
-            ? Swipe.createFromRotation90(swipe)
-            : new Swipe(swipe);
-    if (isTableTopMode) {
-      reorientedSwipe = Swipe.createFromMirror(reorientedSwipe);
-    }
-
+  static BrailleInputPlaneResult createDotHoldAndDotSwipe(
+      Swipe swipe, BrailleCharacter heldBrailleCharacter) {
     BrailleInputPlaneResult result = new BrailleInputPlaneResult();
-    result.type = TYPE_SWIPE;
-    result.swipe = reorientedSwipe;
+    result.type = TYPE_HOLD_AND_SWIPE;
+    result.heldBrailleCharacter = heldBrailleCharacter;
+    result.swipe = swipe;
     return result;
   }
 
-  static BrailleInputPlaneResult createSwipeForTablet(Swipe swipe) {
-    Swipe reorientedSwipe = Swipe.createFromMirror(swipe);
+  static BrailleInputPlaneResult createHold(int pointersHeldCount) {
+    BrailleInputPlaneResult result = new BrailleInputPlaneResult();
+    result.type = TYPE_HOLD;
+    result.pointersHeldCount = pointersHeldCount;
+    return result;
+  }
+
+  static BrailleInputPlaneResult createSwipe(Swipe swipe) {
     BrailleInputPlaneResult result = new BrailleInputPlaneResult();
     result.type = TYPE_SWIPE;
-    result.swipe = reorientedSwipe;
+    result.swipe = swipe;
     return result;
   }
 
@@ -95,12 +102,12 @@ class BrailleInputPlaneResult {
     return "BrailleInputPlaneResult{"
         + "type="
         + type
-        + ", brailleCharacter="
-        + brailleCharacter
+        + ", releasedBrailleCharacter="
+        + releasedBrailleCharacter
         + ", swipe="
         + swipe
-        + ", pointersHeldCount="
-        + pointersHeldCount
+        + ", heldBrailleCharacter="
+        + heldBrailleCharacter
         + '}';
   }
 }

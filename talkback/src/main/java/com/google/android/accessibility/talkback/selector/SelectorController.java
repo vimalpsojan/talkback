@@ -16,6 +16,7 @@
 
 package com.google.android.accessibility.talkback.selector;
 
+import static android.accessibilityservice.AccessibilityServiceInfo.FLAG_SERVICE_HANDLES_DOUBLE_TAP;
 import static com.google.android.accessibility.talkback.Feedback.AdjustValue.Action.DECREASE_VALUE;
 import static com.google.android.accessibility.talkback.Feedback.AdjustValue.Action.INCREASE_VALUE;
 import static com.google.android.accessibility.talkback.Feedback.AdjustVolume.Action.DECREASE_VOLUME;
@@ -23,19 +24,27 @@ import static com.google.android.accessibility.talkback.Feedback.AdjustVolume.Ac
 import static com.google.android.accessibility.talkback.Feedback.AdjustVolume.StreamType.STREAM_TYPE_ACCESSIBILITY;
 import static com.google.android.accessibility.talkback.Feedback.DimScreen.Action.BRIGHTEN;
 import static com.google.android.accessibility.talkback.Feedback.DimScreen.Action.DIM;
+import static com.google.android.accessibility.talkback.Feedback.Focus.Action.CLICK_NODE;
 import static com.google.android.accessibility.talkback.Feedback.FocusDirection.Action.NEXT_PAGE;
 import static com.google.android.accessibility.talkback.Feedback.FocusDirection.Action.PREVIOUS_PAGE;
 import static com.google.android.accessibility.talkback.Feedback.Language.Action.NEXT_LANGUAGE;
 import static com.google.android.accessibility.talkback.Feedback.Language.Action.PREVIOUS_LANGUAGE;
+import static com.google.android.accessibility.talkback.Feedback.ServiceFlag.Action.DISABLE_FLAG;
+import static com.google.android.accessibility.talkback.Feedback.ServiceFlag.Action.ENABLE_FLAG;
 import static com.google.android.accessibility.talkback.actor.TalkBackUIActor.Type.SELECTOR_ITEM_ACTION_OVERLAY;
 import static com.google.android.accessibility.talkback.actor.TalkBackUIActor.Type.SELECTOR_MENU_ITEM_OVERLAY_MULTI_FINGER;
 import static com.google.android.accessibility.talkback.actor.TalkBackUIActor.Type.SELECTOR_MENU_ITEM_OVERLAY_SINGLE_FINGER;
+import static com.google.android.accessibility.talkback.focusmanagement.record.FocusActionInfo.SCREEN_STATE_CHANGE;
+import static com.google.android.accessibility.talkback.focusmanagement.record.FocusActionInfo.TOUCH_EXPLORATION;
+import static com.google.android.accessibility.talkback.menurules.NodeMenuRuleCreator.MenuRules.RULE_CUSTOM_ACTION;
 import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.ACTIONS;
 import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.ADJUSTABLE_WIDGET;
 import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.GRANULARITY_CHARACTERS;
+import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.GRANULARITY_CONTAINERS;
+import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.GRANULARITY_TYPO;
 import static com.google.android.accessibility.talkback.selector.SelectorController.Setting.GRANULARITY_WINDOWS;
 import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
-import static com.google.android.accessibility.utils.input.InputModeManager.INPUT_MODE_TOUCH;
+import static com.google.android.accessibility.utils.monitor.InputModeTracker.INPUT_MODE_TOUCH;
 import static com.google.android.accessibility.utils.traversal.TraversalStrategy.SEARCH_FOCUS_BACKWARD;
 import static com.google.android.accessibility.utils.traversal.TraversalStrategy.SEARCH_FOCUS_FORWARD;
 
@@ -45,31 +54,41 @@ import android.content.SharedPreferences.Editor;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.res.Resources;
 import android.text.TextUtils;
+import android.view.Menu;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.annotation.IdRes;
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
-import androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat;
 import com.google.android.accessibility.talkback.ActorState;
 import com.google.android.accessibility.talkback.Feedback;
 import com.google.android.accessibility.talkback.Feedback.Speech;
 import com.google.android.accessibility.talkback.Feedback.SpeechRate.Action;
+import com.google.android.accessibility.talkback.Interpretation;
 import com.google.android.accessibility.talkback.Pipeline;
 import com.google.android.accessibility.talkback.R;
+import com.google.android.accessibility.talkback.UserInterface.UserInputEventListener;
 import com.google.android.accessibility.talkback.analytics.TalkBackAnalytics;
+import com.google.android.accessibility.talkback.compositor.Compositor;
+import com.google.android.accessibility.talkback.contextmenu.ContextMenu;
+import com.google.android.accessibility.talkback.contextmenu.ContextMenuItem;
+import com.google.android.accessibility.talkback.contextmenu.ContextMenuItem.ContextMenuItemId;
+import com.google.android.accessibility.talkback.eventprocessor.ProcessorAccessibilityHints;
 import com.google.android.accessibility.talkback.focusmanagement.AccessibilityFocusMonitor;
+import com.google.android.accessibility.talkback.focusmanagement.action.NavigationAction;
+import com.google.android.accessibility.talkback.focusmanagement.record.FocusActionInfo;
+import com.google.android.accessibility.talkback.gesture.GestureController;
 import com.google.android.accessibility.talkback.gesture.GestureShortcutMapping;
+import com.google.android.accessibility.talkback.menurules.NodeMenuRuleCreator;
 import com.google.android.accessibility.talkback.preference.base.VerbosityPrefFragment;
-import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
+import com.google.android.accessibility.talkback.selector.SelectorController.Setting.DescriptionAndHint;
 import com.google.android.accessibility.utils.FeatureSupport;
-import com.google.android.accessibility.utils.Filter;
+import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.Role;
 import com.google.android.accessibility.utils.SharedPreferencesUtils;
 import com.google.android.accessibility.utils.WebInterfaceUtils;
-import com.google.android.accessibility.utils.feedbackpolicy.AbstractAccessibilityHintsManager;
 import com.google.android.accessibility.utils.input.CursorGranularity;
 import com.google.android.accessibility.utils.output.FeedbackItem;
 import com.google.android.accessibility.utils.output.SpeechController;
@@ -83,7 +102,7 @@ import java.util.Optional;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Class to handle changes to selector and calls from {@link GestureController}. */
-public class SelectorController {
+public class SelectorController implements UserInputEventListener {
 
   /** The type of granularity. */
   @IntDef({GRANULARITY_FOR_ALL_NODE, GRANULARITY_FOR_NATIVE_NODE, GRANULARITY_FOR_WEB_NODE})
@@ -92,21 +111,24 @@ public class SelectorController {
   private static final int GRANULARITY_FOR_ALL_NODE = 0;
   private static final int GRANULARITY_FOR_NATIVE_NODE = 1;
   private static final int GRANULARITY_FOR_WEB_NODE = 2;
-  private static final int NO_SETTING_INSERTED = -1;
-
-  private static final Filter<AccessibilityNodeInfoCompat> FILTER_HAS_MENU_ACTION =
-      new Filter.NodeCompat(
-          (node) -> {
-            for (AccessibilityActionCompat action : node.getActionList()) {
-              if (shouldIncludeAction(action)) {
-                return true;
-              }
-            }
-            return false;
-          });
 
   /** The current action id selected for the actions setting. */
-  private int currentActionId = NO_SETTING_INSERTED;
+  private ContextMenuItemId currentActionId;
+
+  private boolean hasRequestServiceHandlesDoubleTap = false;
+  // To reduce the frequency of currentSetting update, we don't update the setting while the touch
+  // interaction's ongoing. This flag records the touch interaction start/end, respectively. So that
+  // the currentSetting will only happen when touch event's ended.
+  private boolean touchActive = false;
+  // Accompanying the 'touchActive' flag, this variable avoids the reassign of the same node.
+  private AccessibilityNodeInfo lastFocusedNode = null;
+
+  /** Audial feedback announce types. */
+  public enum AnnounceType {
+    SILENCE,
+    DESCRIPTION,
+    DESCRIPTION_AND_HINT,
+  }
 
   /** Selector settings. */
   public enum Setting {
@@ -186,6 +208,10 @@ public class SelectorController {
         R.string.pref_selector_granularity_windows_key,
         R.string.selector_granularity_windows,
         R.bool.pref_selector_granularity_windows_default),
+    GRANULARITY_CONTAINERS(
+        R.string.pref_selector_granularity_containers_key,
+        R.string.selector_granularity_containers,
+        R.bool.pref_selector_granularity_containers_default),
     GRANULARITY_DEFAULT(
         R.string.pref_selector_granularity_key,
         R.string.granularity_default,
@@ -193,14 +219,20 @@ public class SelectorController {
     ADJUSTABLE_WIDGET(
         R.string.pref_selector_special_widget_key,
         R.string.selector_special_widget,
-        R.bool.pref_selector_special_widget_default);
+        R.bool.pref_selector_special_widget_default),
+    GRANULARITY_TYPO(
+        R.string.pref_selector_granularity_typo_key,
+        R.string.selector_granularity_typo,
+        R.bool.pref_selector_granularity_typo_default);
 
     /** The preference key of the filter in the selector settings page. */
     final int prefKeyResId;
+
     /**
      * When the user select the setting, the value will be saved in the current setting preference.
      */
     final int prefValueResId;
+
     /** The setting is on or off in default. */
     final int defaultValueResId;
 
@@ -220,6 +252,17 @@ public class SelectorController {
       }
       return null;
     }
+
+    /** Class wraps the {@link Setting} description and hint. */
+    public static class DescriptionAndHint {
+      public final String description;
+      public final String hint;
+
+      public DescriptionAndHint(String description, String hint) {
+        this.description = description;
+        this.hint = hint;
+      }
+    }
   }
 
   /** Granularities are provided by the selector. */
@@ -234,6 +277,8 @@ public class SelectorController {
     LINKS(Setting.GRANULARITY_LINKS, CursorGranularity.LINK, GRANULARITY_FOR_NATIVE_NODE),
     CONTROLS(Setting.GRANULARITY_CONTROLS, CursorGranularity.CONTROL, GRANULARITY_FOR_NATIVE_NODE),
     WINDOWS(GRANULARITY_WINDOWS, CursorGranularity.WINDOWS, GRANULARITY_FOR_ALL_NODE),
+    CONTAINERS(
+        Setting.GRANULARITY_CONTAINERS, CursorGranularity.CONTAINER, GRANULARITY_FOR_ALL_NODE),
     DEFAULT(Setting.GRANULARITY_DEFAULT, CursorGranularity.DEFAULT, GRANULARITY_FOR_ALL_NODE),
 
     // For WebView.
@@ -279,13 +324,17 @@ public class SelectorController {
     public static @Nullable Granularity getSupportedGranularity(
         ActorState actorState, Setting setting) {
       List<Granularity> granularities = Granularity.getFromSetting(setting);
+      if (granularities.size() == 1) {
+        return granularities.get(0);
+      }
+
+      boolean isWeb = actorState.getDirectionNavigation().hasNavigableWebContent();
       for (Granularity granularity : granularities) {
-        if (actorState
-            .getDirectionNavigation()
-            .supportedGranularity(granularity.cursorGranularity, EVENT_ID_UNTRACKED)) {
+        if (isValid(granularity, isWeb)) {
           return granularity;
         }
       }
+
       return null;
     }
 
@@ -299,29 +348,48 @@ public class SelectorController {
       }
       return null;
     }
+
+    static boolean isValid(Granularity granularity, boolean isWebContent) {
+      if (granularity.granularityType == GRANULARITY_FOR_ALL_NODE) {
+        return true;
+      }
+
+      if ((granularity.granularityType == GRANULARITY_FOR_NATIVE_NODE && !isWebContent)
+          || (granularity.granularityType == GRANULARITY_FOR_WEB_NODE && isWebContent)) {
+        return true;
+      }
+
+      return false;
+    }
   }
 
   private final Context context;
   private final AccessibilityFocusMonitor accessibilityFocusMonitor;
-  private Pipeline.FeedbackReturner pipeline;
-  private ActorState actorState;
+  private final Pipeline.FeedbackReturner pipeline;
+  private final ActorState actorState;
+  private final NodeMenuRuleCreator nodeMenuCreator;
   private final TalkBackAnalytics analytics;
   private final SharedPreferences prefs;
   private final GestureShortcutMapping gestureMapping;
-  private final AbstractAccessibilityHintsManager hintsManager;
+  @NonNull private final Compositor.TextComposer compositor;
+  private final FormFactorUtils formFactorUtils;
+
   /**
    * Keeps gestures to announce the usage hint for how to select setting (change quick menu item).
    */
-  private List<String> selectSettingGestures;
+  private @Nullable String cachedSelectSettingGestureNames;
+
   /**
    * Keeps gestures to announce the usage hint for how to adjust selected setting (change quick menu
    * item action).
    */
-  private List<String> adjustSelectedSettingGestures;
+  private @Nullable String cachedAdjustSelectedSettingGestureNames;
+
   // Flattening granularities into the quick menu for all devices from TalkBack 9.1.
   // This index of GRANULARITY_XXX is used in granularity voice command array.
   public static final ImmutableList<Setting> SELECTOR_SETTINGS =
       ImmutableList.of(
+          Setting.GRANULARITY_TYPO,
           Setting.ACTIONS,
           Setting.GRANULARITY_CHARACTERS,
           Setting.GRANULARITY_WORDS,
@@ -332,6 +400,7 @@ public class SelectorController {
           Setting.GRANULARITY_LINKS,
           Setting.GRANULARITY_LANDMARKS,
           Setting.GRANULARITY_WINDOWS,
+          Setting.GRANULARITY_CONTAINERS,
           Setting.GRANULARITY_DEFAULT,
           // TODO Supports special content.
           Setting.SPEECH_RATE,
@@ -346,17 +415,20 @@ public class SelectorController {
           Setting.ADJUSTABLE_WIDGET);
 
   /** Lists all {@link Setting} that should be hidden for users. */
-  private static final ImmutableList<Setting> HIDDEN_SETTINGS = ImmutableList.of(Setting.ACTIONS);
+  private final ImmutableList<Setting> hiddenSettings;
 
-  private static final ImmutableList<ContextualSetting> CONTEXTUAL_SETTINGS =
-      ImmutableList.of(new AdjustableWidgetSetting());
+  /** Lists all {@link ContextualSetting} that should be supported. */
+  private final ImmutableList<ContextualSetting> contextualSettings;
+
+  /** Selector event notifier. */
+  private final SelectorEventNotifier selectorEventNotifier;
 
   private final OnSharedPreferenceChangeListener sharedPreferenceChangeListener =
       (prefs, key) -> {
         // Clears selector gestures but doesn't update them now because GestureShortcutMapping
         // hasn't finished reloading yet.
-        selectSettingGestures = null;
-        adjustSelectedSettingGestures = null;
+        cachedSelectSettingGestureNames = null;
+        cachedAdjustSelectedSettingGestureNames = null;
       };
 
   private Setting settingToRestore;
@@ -369,33 +441,62 @@ public class SelectorController {
     /** Returns the dependent item in {@link Setting}. */
     Setting getSetting();
 
+    /** Returns whether the {@link AccessibilityNodeInfoCompat} support the setting. */
+    boolean isNodeSupportSetting(Context context, AccessibilityNodeInfoCompat node);
+
     /** Returns whether the setting should be activated automatically. */
-    boolean shouldActivateSetting(Context context, AccessibilityNodeInfoCompat node);
+    default boolean shouldActivateSetting(Context context, AccessibilityNodeInfoCompat node) {
+      return isNodeSupportSetting(context, node);
+    }
+  }
+
+  /** Notifier notifies {@link SelectorController} events. */
+  public interface SelectorEventNotifier {
+    /** Callbacks when overlay shown message. */
+    void onSelectorOverlayShown(CharSequence message);
   }
 
   public SelectorController(
       @NonNull Context context,
+      @NonNull Pipeline.FeedbackReturner pipeline,
+      @NonNull ActorState actorState,
       @NonNull AccessibilityFocusMonitor accessibilityFocusMonitor,
+      @NonNull NodeMenuRuleCreator nodeMenuCreator,
       @NonNull TalkBackAnalytics analytics,
       @NonNull GestureShortcutMapping gestureMapping,
-      AbstractAccessibilityHintsManager hintsManager) {
-
+      @NonNull Compositor.TextComposer compositor,
+      @NonNull SelectorEventNotifier selectorEventNotifier) {
     this.context = context;
+    this.pipeline = pipeline;
+    this.actorState = actorState;
     this.accessibilityFocusMonitor = accessibilityFocusMonitor;
+    this.nodeMenuCreator = nodeMenuCreator;
     this.analytics = analytics;
     this.gestureMapping = gestureMapping;
-    this.hintsManager = hintsManager;
+    this.compositor = compositor;
+    this.formFactorUtils = FormFactorUtils.getInstance();
+    this.selectorEventNotifier = selectorEventNotifier;
 
-    prefs = SharedPreferencesUtils.getSharedPreferences(this.context);
+    // Initialize hidden Setting List. (no Setting should be hidden by v13.1).
+    ImmutableList.Builder<Setting> hiddenSettingsBuilder = ImmutableList.builder();
+    if (formFactorUtils.isAndroidWear()) {
+      hiddenSettingsBuilder.add(GRANULARITY_TYPO);
+    } else if (!FeatureSupport.doesServiceHandleDoubleTap()) {
+      hiddenSettingsBuilder.add(ACTIONS);
+    }
+    hiddenSettings = hiddenSettingsBuilder.build();
+
+    // Initialize contextual Setting List.
+    ImmutableList.Builder<ContextualSetting> contextualSettingsBuilder = ImmutableList.builder();
+    contextualSettingsBuilder.add(new AdjustableWidgetSetting());
+    contextualSettingsBuilder.add(new ActionsSetting(nodeMenuCreator, accessibilityFocusMonitor));
+    contextualSettingsBuilder.add(new TypoGranularity(accessibilityFocusMonitor));
+    contextualSettings = contextualSettingsBuilder.build();
+
+    resetActionMenuToDefault();
+
+    prefs = SharedPreferencesUtils.getSharedPreferences(context);
     prefs.registerOnSharedPreferenceChangeListener(sharedPreferenceChangeListener);
-  }
-
-  public void setActorState(ActorState actorState) {
-    this.actorState = actorState;
-  }
-
-  public void setPipeline(Pipeline.FeedbackReturner pipeline) {
-    this.pipeline = pipeline;
   }
 
   /** Gets the Setting for by granularity resources ID. */
@@ -416,6 +517,8 @@ public class SelectorController {
       return Setting.GRANULARITY_LANDMARKS;
     } else if (granularity == R.string.granularity_window) {
       return Setting.GRANULARITY_WINDOWS;
+    } else if (granularity == R.string.granularity_container) {
+      return Setting.GRANULARITY_CONTAINERS;
     } else if (granularity == R.string.granularity_default) {
       return Setting.GRANULARITY_DEFAULT;
     }
@@ -457,6 +560,7 @@ public class SelectorController {
         case GRANULARITY_CONTROLS:
         case GRANULARITY_LANDMARKS:
         case GRANULARITY_WINDOWS:
+        case GRANULARITY_CONTAINERS:
         case GRANULARITY_DEFAULT:
           updateSettingPref(context, setting);
           return;
@@ -465,13 +569,16 @@ public class SelectorController {
     }
   }
 
-  /** Sets the current Setting and announces the hint if {@code announce} is true. */
-  private void setCurrentSetting(
-      EventId eventId, Setting newSetting, boolean announce, boolean showOverlay) {
-    updateSettingPref(context, newSetting);
+  /** Returns the action description of the ACTIONS setting. */
+  public String getSelectorActionSettingsDescription() {
+    return context.getString(R.string.title_pref_selector_actions);
+  }
+
+  /** Retrieves the {@link Setting} action description and hint in a {@link DescriptionAndHint}. */
+  public DescriptionAndHint getSettingActionDescriptionAndHint(Setting setting, EventId eventId) {
     String actionDescription = null;
     String hint = null;
-    switch (newSetting) {
+    switch (setting) {
       case SPEECH_RATE:
         actionDescription = context.getString(R.string.title_pref_selector_speech_rate);
         hint = getAdjustSelectedSettingGestures();
@@ -505,7 +612,9 @@ public class SelectorController {
         hint = getAdjustSelectedSettingGestures();
         break;
       case ACTIONS:
-        actionDescription = context.getString(R.string.title_pref_selector_actions);
+        // Reset currentActionId to the default action.
+        resetActionMenuToDefault();
+        actionDescription = getSelectorActionSettingsDescription();
         hint = getAdjustSelectedSettingGestures();
         break;
       case GRANULARITY_HEADINGS:
@@ -517,10 +626,11 @@ public class SelectorController {
       case GRANULARITY_CONTROLS:
       case GRANULARITY_LANDMARKS:
       case GRANULARITY_WINDOWS:
+      case GRANULARITY_CONTAINERS:
       case GRANULARITY_DEFAULT:
         {
           @Nullable Granularity granularity =
-              Granularity.getSupportedGranularity(actorState, newSetting);
+              Granularity.getSupportedGranularity(actorState, setting);
           if (granularity != null) {
             // Changes the current granularity.
             pipeline.returnFeedback(eventId, Feedback.granularity(granularity.cursorGranularity));
@@ -543,25 +653,44 @@ public class SelectorController {
         }
         hint = getAdjustSelectedSettingGestures();
         break;
+      case GRANULARITY_TYPO:
+        actionDescription = context.getString(R.string.title_pref_selector_typo_granularity);
+        hint = getNavigateTypoGestures();
+        break;
       default:
     }
+    return new DescriptionAndHint(actionDescription, hint);
+  }
 
-    if (hint != null) {
-      analytics.onSelectorEvent();
-    }
-    if (TextUtils.isEmpty(actionDescription)) {
+  /** Sets the current Setting and announces depends on {@code announceType}. */
+  private void setCurrentSetting(
+      EventId eventId, Setting newSetting, AnnounceType announceType, boolean showOverlay) {
+    updateSettingPref(context, newSetting);
+    DescriptionAndHint descriptionAndHint = getSettingActionDescriptionAndHint(newSetting, eventId);
+
+    // There's no setting needed to handle double-tap by default, reset it once setting changed.
+    requestServiceHandlesDoubleTap(EVENT_ID_UNTRACKED, false);
+
+    if (TextUtils.isEmpty(descriptionAndHint.description)) {
       return;
     }
-    if (announce) {
-      announceSetting(eventId, actionDescription, hint);
+    if (announceType == AnnounceType.DESCRIPTION) {
+      announceSetting(eventId, descriptionAndHint.description, null);
+    } else if (announceType == AnnounceType.DESCRIPTION_AND_HINT) {
+      announceSetting(eventId, descriptionAndHint.description, descriptionAndHint.hint);
     }
     if (showOverlay) {
-      showQuickMenuOverlay(eventId, actionDescription);
+      showQuickMenuOverlay(eventId, descriptionAndHint.description);
     }
   }
 
   /** Gets the current setting from the preference. */
-  private Setting getCurrentSetting() {
+  public static Setting getCurrentSetting(Context context) {
+    return getCurrentSetting(context, SharedPreferencesUtils.getSharedPreferences(context));
+  }
+
+  /** Gets the current setting from the preference. */
+  private static Setting getCurrentSetting(Context context, SharedPreferences prefs) {
     @Nullable Setting currentSetting =
         Setting.getSettingFromPrefValue(
             context,
@@ -577,13 +706,14 @@ public class SelectorController {
    * the setting during the selection mode life time, system will change the setting back to its
    * original value when the selection mode stops.
    */
-  public void editTextSelected(boolean isSelected) {
+  @Override
+  public void editTextOrSelectableTextSelected(boolean isSelected) {
     if (isSelected) {
-      settingToRestore = getCurrentSetting();
+      settingToRestore = getCurrentSetting(context, prefs);
       setCurrentSetting(
           EVENT_ID_UNTRACKED,
           Setting.GRANULARITY_CHARACTERS,
-          /* announce= */ false,
+          /* announceType= */ AnnounceType.SILENCE,
           /* showOverlay= */ false);
       return;
     }
@@ -601,26 +731,94 @@ public class SelectorController {
    * <p>Note: We need to consider to adjust the reading menu setting. The argument {@code nodeInfo}
    * is wrapped into AccessibilityNodeInfoCompat node.
    */
-  public void newItemFocused(AccessibilityNodeInfo nodeInfo) {
-    Setting currentSetting = getCurrentSetting();
+  @Override
+  public void newItemFocused(AccessibilityNodeInfo nodeInfo, Interpretation interpretation) {
+    // Reset currentActionId to the default action.
+    resetActionMenuToDefault();
+
+    FocusActionInfo focusActionInfo = null;
+    if (interpretation instanceof Interpretation.AccessibilityFocused) {
+      Interpretation.AccessibilityFocused focusEventInterpretation =
+          (Interpretation.AccessibilityFocused) interpretation;
+      focusActionInfo = focusEventInterpretation.focusActionInfo();
+    }
+
+    if (focusActionInfo == null) {
+      return;
+    }
+
+    if (!allowSwitchSettingByFocusChange(focusActionInfo)) {
+      return;
+    }
+
+    if (nodeInfo == null || nodeInfo.equals(lastFocusedNode)) {
+      return;
+    }
+    if (touchActive) {
+      lastFocusedNode = nodeInfo;
+    } else {
+      switchCurrentSetting(nodeInfo);
+    }
+  }
+
+  /**
+   * Returns true if the selector should switch to the {@link ContextualSetting} automatically when
+   * the accessibility focus changed.
+   *
+   * <p>Allow switching the setting when:
+   *
+   * <ul>
+   *   <li>Focus change triggered by touch exploration.
+   *   <li>Focus change triggered by window changes.
+   *   <li>Focus change triggered by default granularity.
+   * </ul>
+   */
+  private boolean allowSwitchSettingByFocusChange(FocusActionInfo focusActionInfo) {
+    if (focusActionInfo.sourceAction == TOUCH_EXPLORATION
+        || focusActionInfo.sourceAction == SCREEN_STATE_CHANGE) {
+      return true;
+    }
+
+    NavigationAction navigationAction = focusActionInfo.navigationAction;
+    if (navigationAction != null) {
+      CursorGranularity cursorGranularity = navigationAction.originalNavigationGranularity;
+      if (cursorGranularity == CursorGranularity.DEFAULT) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private void switchCurrentSetting(AccessibilityNodeInfo nodeInfo) {
+    Setting currentSetting = getCurrentSetting(context, prefs);
     if (nodeInfo != null) {
+      lastFocusedNode = null;
       Optional<ContextualSetting> contextualMenu =
-          getMatchedContextualSetting(context, AccessibilityNodeInfoCompat.wrap(nodeInfo));
+          getMatchedContextualSettingForActivation(
+              context, AccessibilityNodeInfoCompat.wrap(nodeInfo), hiddenSettings);
       // If a matched contextual setting is available, switch to that setting automatically.
       if (contextualMenu.isPresent()) {
-        if (contextualMenu.get().getSetting() != currentSetting) {
+        Setting newSetting = contextualMenu.get().getSetting();
+        if (newSetting == ACTIONS && Role.getRole(nodeInfo) == Role.ROLE_EDIT_TEXT) {
+          // Actions menu maybe not the best option for text editing experience, so keep the
+          // original setting first.
+          restoreSetting();
+          return;
+        }
+
+        if (newSetting != currentSetting) {
           settingToRestore = currentSetting;
           setCurrentSetting(
               EVENT_ID_UNTRACKED,
-              contextualMenu.get().getSetting(),
-              /* announce= */ false,
+              newSetting,
+              /* announceType= */ AnnounceType.SILENCE,
               /* showOverlay= */ false);
         }
 
         return;
       }
     }
-
     // If the current setting is a contextual setting and no longer allowed by the new focused
     // node, then restore to the cached setting or move the setting to the first available item if
     // the cached setting is also unavailable.
@@ -629,17 +827,50 @@ public class SelectorController {
     }
   }
 
+  @Override
+  public void touchInteractionState(boolean active) {
+    touchActive = active;
+    if (!touchActive) {
+      if (lastFocusedNode != null) {
+        switchCurrentSetting(lastFocusedNode);
+      }
+    }
+  }
+
   /** Selects the previous or next setting. For selecting setting via gesture. */
-  public void selectPreviousOrNextSetting(EventId eventId, boolean isNext) {
+  public void selectPreviousOrNextSetting(
+      EventId eventId, AnnounceType announceType, boolean isNext) {
+    Optional<Setting> setting = getNextOrPreviousSetting(isNext);
+    if (setting.isEmpty()) {
+      return;
+    }
+    analytics.onSelectorEvent();
+    setCurrentSetting(eventId, setting.get(), announceType, /* showOverlay= */ true);
+  }
+
+  /**
+   * Selects the previous or next setting without overlay displayed. For selecting setting via
+   * gesture.
+   */
+  public void selectPreviousOrNextSettingWithoutOverlay(
+      EventId eventId, AnnounceType announceType, boolean isNext) {
+    Optional<Setting> setting = getNextOrPreviousSetting(isNext);
+    if (setting.isEmpty()) {
+      return;
+    }
+    setCurrentSetting(eventId, setting.get(), announceType, /* showOverlay= */ false);
+  }
+
+  private Optional<Setting> getNextOrPreviousSetting(boolean isNext) {
     List<Setting> settings = getFilteredSettings();
 
     int settingsSize = settings.size();
     if (settingsSize == 0) {
-      return;
+      return Optional.empty();
     }
 
     // Get the index of the selected setting.
-    int index = settings.indexOf(getCurrentSetting());
+    int index = settings.indexOf(getCurrentSetting(context, prefs));
 
     // Change the selected setting.
     // If the current settings is not valid, the index (-1) will fall-back to 0 or settingsSize - 1
@@ -657,8 +888,7 @@ public class SelectorController {
         index = settingsSize - 1;
       }
     }
-
-    setCurrentSetting(eventId, settings.get(index), true, /* showOverlay= */ true);
+    return Optional.of(settings.get(index));
   }
 
   /**
@@ -668,8 +898,9 @@ public class SelectorController {
   private void selectFirstAvailableSetting() {
     List<Setting> settings = getFilteredSettings();
     if (!settings.isEmpty()) {
-      selectSetting(settings.get(0), false, false);
+      selectSetting(settings.get(0), AnnounceType.SILENCE, false);
     } else {
+      requestServiceHandlesDoubleTap(EVENT_ID_UNTRACKED, false);
       resetSelectedSetting(context);
     }
   }
@@ -681,7 +912,10 @@ public class SelectorController {
   private void restoreSetting() {
     if (settingToRestore != null && allowedSetting(settingToRestore)) {
       setCurrentSetting(
-          EVENT_ID_UNTRACKED, settingToRestore, /* announce= */ false, /* showOverlay= */ false);
+          EVENT_ID_UNTRACKED,
+          settingToRestore,
+          /* announceType= */ AnnounceType.SILENCE,
+          /* showOverlay= */ false);
     } else {
       selectFirstAvailableSetting();
     }
@@ -690,18 +924,27 @@ public class SelectorController {
     settingToRestore = null;
   }
 
+  /** Selects setting silently. For selecting setting automatically. */
+  public boolean selectSettingSilently(@Nullable Setting setting) {
+    return selectSetting(
+        setting, /* announceType= */ AnnounceType.SILENCE, /* showOverlay= */ false);
+  }
+
   /** Selects setting and announces selected setting. For selecting setting via voice-shortcut. */
   public boolean selectSetting(@Nullable Setting setting) {
-    return selectSetting(setting, /* announce= */ true, /* showOverlay= */ true);
+    return selectSetting(
+        setting, /* announceType= */ AnnounceType.DESCRIPTION_AND_HINT, /* showOverlay= */ true);
   }
 
   /** Selects setting and announces selected setting. For selecting setting via voice-shortcut. */
   public boolean selectSetting(@Nullable Setting setting, boolean showOverlay) {
-    return selectSetting(setting, /* announce= */ true, showOverlay);
+    return selectSetting(
+        setting, /* announceType= */ AnnounceType.DESCRIPTION_AND_HINT, showOverlay);
   }
 
   /** Selects setting and announces selected setting. For selecting setting via voice-shortcut. */
-  private boolean selectSetting(@Nullable Setting setting, boolean announce, boolean showOverlay) {
+  private boolean selectSetting(
+      @Nullable Setting setting, AnnounceType announceType, boolean showOverlay) {
     if (setting == null || !allowedSetting(setting)) {
       return false;
     }
@@ -714,7 +957,7 @@ public class SelectorController {
       prefs.edit().putString(currentSettingKey, settingValue).apply();
     }
 
-    setCurrentSetting(EVENT_ID_UNTRACKED, setting, announce, showOverlay);
+    setCurrentSetting(EVENT_ID_UNTRACKED, setting, announceType, showOverlay);
     return true;
   }
 
@@ -745,8 +988,8 @@ public class SelectorController {
         }
       case AUDIO_FOCUS:
         {
-          // Add audio focus setting if not ARC, as for ARC this preference is not supported.
-          return !FeatureSupport.isArc();
+          // Audio focus is supported in all platforms.
+          return true;
         }
       case SCROLLING_SEQUENTIAL:
         return true;
@@ -754,29 +997,8 @@ public class SelectorController {
         return FeatureSupport.hasAccessibilityAudioStream(context);
       case ACTIONS:
         {
-          if (node == null) {
-            node = accessibilityFocusMonitor.getAccessibilityFocus(false);
-          }
-
-          return hasActions(node);
-        }
-      case GRANULARITY_HEADINGS:
-      case GRANULARITY_WORDS:
-      case GRANULARITY_PARAGRAPHS:
-      case GRANULARITY_CHARACTERS:
-      case GRANULARITY_LINES:
-      case GRANULARITY_LINKS:
-      case GRANULARITY_CONTROLS:
-      case GRANULARITY_LANDMARKS:
-      case GRANULARITY_WINDOWS:
-      case GRANULARITY_DEFAULT:
-        {
-          return Granularity.getSupportedGranularity(actorState, setting) != null;
-        }
-      case ADJUSTABLE_WIDGET:
-        {
-          Optional<ContextualSetting> adjustableWidget = findContextualSetting(ADJUSTABLE_WIDGET);
-          if (!adjustableWidget.isPresent()) {
+          Optional<ContextualSetting> actions = findContextualSetting(ACTIONS);
+          if (actions.isEmpty()) {
             return false;
           }
 
@@ -784,11 +1006,40 @@ public class SelectorController {
             node =
                 accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ false);
           }
-          return adjustableWidget.get().shouldActivateSetting(context, node);
+          return actions.get().isNodeSupportSetting(context, node);
         }
+      case GRANULARITY_LINES:
+        // TODO: As the text selection for line granularity movement does not work,
+        // we mask off the LINE granularity temporarily.
+        return FeatureSupport.supportInputConnectionByA11yService()
+            || !actorState.getDirectionNavigation().isSelectionModeActive();
+      case ADJUSTABLE_WIDGET:
+        {
+          Optional<ContextualSetting> adjustableWidget = findContextualSetting(ADJUSTABLE_WIDGET);
+          if (adjustableWidget.isEmpty()) {
+            return false;
+          }
+
+          if (node == null) {
+            node =
+                accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ false);
+          }
+          return adjustableWidget.get().isNodeSupportSetting(context, node);
+        }
+      case GRANULARITY_TYPO:
+        Optional<ContextualSetting> typoGranularity = findContextualSetting(GRANULARITY_TYPO);
+        if (typoGranularity.isEmpty()) {
+          return false;
+        }
+        return typoGranularity.get().isNodeSupportSetting(context, node);
       default:
         return true;
     }
+  }
+
+  /** Returns {@code true} if the reading control contains the {@code setting}. */
+  public boolean isSettingAvailable(Setting setting) {
+    return getFilteredSettings().contains(setting);
   }
 
   /**
@@ -802,7 +1053,7 @@ public class SelectorController {
         accessibilityFocusMonitor.getAccessibilityFocus(false);
 
     for (Setting setting : SELECTOR_SETTINGS) {
-      if (HIDDEN_SETTINGS.contains(setting)) {
+      if (hiddenSettings.contains(setting)) {
         continue;
       }
 
@@ -813,27 +1064,13 @@ public class SelectorController {
     return filteredSettingsBuilder.build();
   }
 
-  private boolean hasActions(@Nullable AccessibilityNodeInfoCompat node) {
-    if (node == null) {
-      return false;
-    }
-
-    AccessibilityNodeInfoCompat actionNode =
-        AccessibilityNodeInfoUtils.getSelfOrMatchingAncestor(node, FILTER_HAS_MENU_ACTION);
-    return actionNode != null;
-  }
-
   /** Announces the quick menu item or action, and the usage hint. */
   private void announceSetting(
-      EventId eventId, @Nullable String announcement, @Nullable String hint) {
+      EventId eventId, @Nullable CharSequence announcement, @Nullable String hint) {
     if (!TextUtils.isEmpty(announcement)) {
       if (!TextUtils.isEmpty(hint)) {
-        // To ensure the hint will follow the main text, we use SpeechController
-        // #setCompletedAction(UtteranceCompleteRunnable) to implement the usage hint. It means the
-        // hint should be added before the main text, then the SpeechController will defer it until
-        // finishing the main text.
-        // TODO: Handles the hint through the pipeline.
-        hintsManager.postHintForSelector(hint);
+        pipeline.returnFeedback(
+            eventId, ProcessorAccessibilityHints.selectorEventToHint(hint, context, compositor));
       }
       pipeline.returnFeedback(
           eventId,
@@ -855,31 +1092,40 @@ public class SelectorController {
    * Returns the usage hint when adjusting the selected setting, like "three-finger swipe left or
    * three-finger swipe right to select a different setting."
    */
+  @NonNull
   private String getSelectSettingGestures() {
-    if (selectSettingGestures == null) {
-      selectSettingGestures =
+    String selectSettingGestureNames = getSelectSettingGestureNames();
+    if (selectSettingGestureNames.isEmpty()) {
+      // There is no gesture to select setting.
+      return context.getString(
+          R.string.no_adjust_setting_gesture,
+          Ascii.toLowerCase(context.getString(R.string.shortcut_select_next_setting)));
+    }
+    return context.getString(R.string.select_setting_hint, selectSettingGestureNames);
+  }
+
+  @NonNull
+  private String getSelectSettingGestureNames() {
+    String selectSettingGestureNames = cachedSelectSettingGestureNames;
+    if (selectSettingGestureNames == null) {
+      List<String> rawNames =
           gestureMapping.getGestureTextsFromActionKeys(
               context.getString(R.string.shortcut_value_select_previous_setting),
               context.getString(R.string.shortcut_value_select_next_setting));
-    }
-    CharSequence gestureNames;
-    switch (selectSettingGestures.size()) {
-      case 0:
-        // There is no gesture to select setting.
-        return context.getString(
-            R.string.no_adjust_setting_gesture,
-            Ascii.toLowerCase(context.getString(R.string.shortcut_select_next_setting)));
-      case 1:
-        gestureNames = Ascii.toLowerCase(selectSettingGestures.get(0));
-        return context.getString(R.string.select_setting_hint, gestureNames);
-      default:
-        gestureNames =
+      if (rawNames.isEmpty()) {
+        selectSettingGestureNames = "";
+      } else if (rawNames.size() == 1) {
+        selectSettingGestureNames = Ascii.toLowerCase(rawNames.get(0));
+      } else {
+        selectSettingGestureNames =
             context.getString(
                 R.string.gesture_1_or_2,
-                Ascii.toLowerCase(selectSettingGestures.get(0)),
-                Ascii.toLowerCase(selectSettingGestures.get(1)));
-        return context.getString(R.string.select_setting_hint, gestureNames);
+                Ascii.toLowerCase(rawNames.get(0)),
+                Ascii.toLowerCase(rawNames.get(1)));
+      }
+      cachedSelectSettingGestureNames = selectSettingGestureNames;
     }
+    return selectSettingGestureNames;
   }
 
   /**
@@ -887,30 +1133,27 @@ public class SelectorController {
    * setting."
    */
   private String getAdjustSelectedSettingGestures() {
-    if (adjustSelectedSettingGestures == null) {
-      adjustSelectedSettingGestures =
-          gestureMapping.getGestureTextsFromActionKeys(
-              context.getString(R.string.shortcut_value_selected_setting_previous_action),
-              context.getString(R.string.shortcut_value_selected_setting_next_action));
+    String adjustSelectedSettingsGestureNames = getAdjustSelectedSettingGestureNames();
+    if (adjustSelectedSettingsGestureNames.isEmpty()) {
+      // There is no gesture to adjust setting.
+      return context.getString(
+          R.string.no_adjust_setting_gesture,
+          Ascii.toLowerCase(context.getString(R.string.shortcut_selected_setting_next_action)));
     }
-    CharSequence gestureNames;
-    switch (adjustSelectedSettingGestures.size()) {
-      case 0:
-        // There is no gesture to adjust setting.
-        return context.getString(
-            R.string.no_adjust_setting_gesture,
-            Ascii.toLowerCase(context.getString(R.string.shortcut_selected_setting_next_action)));
-      case 1:
-        gestureNames = Ascii.toLowerCase(adjustSelectedSettingGestures.get(0));
-        return context.getString(R.string.adjust_setting_hint, gestureNames);
-      default:
-        gestureNames =
-            context.getString(
-                R.string.gesture_1_or_2,
-                Ascii.toLowerCase(adjustSelectedSettingGestures.get(0)),
-                Ascii.toLowerCase(adjustSelectedSettingGestures.get(1)));
-        return context.getString(R.string.adjust_setting_hint, gestureNames);
+    return context.getString(R.string.adjust_setting_hint, adjustSelectedSettingsGestureNames);
+  }
+
+  /**
+   * Returns the usage hint when selecting a typo granularity like "swipe up or swipe down to start
+   * spell check"
+   */
+  private String getNavigateTypoGestures() {
+    String adjustSelectedSettingsGestureNames = getAdjustSelectedSettingGestureNames();
+    if (adjustSelectedSettingsGestureNames.isEmpty()) {
+      // There is no gesture to navigate typo.
+      return context.getString(R.string.no_navigate_typo_gesture);
     }
+    return context.getString(R.string.adjust_typo_hint, adjustSelectedSettingsGestureNames);
   }
 
   /**
@@ -918,47 +1161,63 @@ public class SelectorController {
    * read by word."
    */
   private String getAdjustSelectedGranularityGestures(Granularity granularity) {
-    if (adjustSelectedSettingGestures == null) {
-      adjustSelectedSettingGestures =
-          gestureMapping.getGestureTextsFromActionKeys(
-              context.getString(R.string.shortcut_value_selected_setting_previous_action),
-              context.getString(R.string.shortcut_value_selected_setting_next_action));
-    }
-    CharSequence gestureNames;
     String cursorGranularity =
         (granularity.setting == Setting.GRANULARITY_DEFAULT)
             ? context.getString(R.string.title_granularity_default)
             : context.getString(granularity.cursorGranularity.resourceId);
-    switch (adjustSelectedSettingGestures.size()) {
-      case 0:
-        // There is no gesture to read by selected granularity.
-        return context.getString(
-            R.string.no_adjust_setting_gesture,
-            Ascii.toLowerCase(context.getString(R.string.shortcut_selected_setting_next_action)));
-      case 1:
-        gestureNames = Ascii.toLowerCase(adjustSelectedSettingGestures.get(0));
-        return context.getString(
-            R.string.adjust_granularity_hint, gestureNames, Ascii.toLowerCase(cursorGranularity));
-      default:
-        gestureNames =
+    return getAdjustSelectedGranularityGestures(cursorGranularity);
+  }
+
+  private String getAdjustSelectedGranularityGestures(String cursorGranularity) {
+    String adjustSelectedSettingsGestureNames = getAdjustSelectedSettingGestureNames();
+    if (adjustSelectedSettingsGestureNames.isEmpty()) {
+      // There is no gesture to read by selected granularity.
+      return context.getString(
+          R.string.no_adjust_setting_gesture,
+          Ascii.toLowerCase(context.getString(R.string.shortcut_selected_setting_next_action)));
+    }
+    return context.getString(
+        R.string.adjust_granularity_hint,
+        adjustSelectedSettingsGestureNames,
+        Ascii.toLowerCase(cursorGranularity));
+  }
+
+  @NonNull
+  private String getAdjustSelectedSettingGestureNames() {
+    String adjustSelectedSettingGestureNames = cachedAdjustSelectedSettingGestureNames;
+    if (adjustSelectedSettingGestureNames == null) {
+      List<String> rawNames =
+          gestureMapping.getGestureTextsFromActionKeys(
+              context.getString(R.string.shortcut_value_selected_setting_previous_action),
+              context.getString(R.string.shortcut_value_selected_setting_next_action));
+      if (rawNames.isEmpty()) {
+        adjustSelectedSettingGestureNames = "";
+      } else if (rawNames.size() == 1) {
+        adjustSelectedSettingGestureNames = Ascii.toLowerCase(rawNames.get(0));
+      } else {
+        adjustSelectedSettingGestureNames =
             context.getString(
                 R.string.gesture_1_or_2,
-                Ascii.toLowerCase(adjustSelectedSettingGestures.get(0)),
-                Ascii.toLowerCase(adjustSelectedSettingGestures.get(1)));
-        return context.getString(
-            R.string.adjust_granularity_hint, gestureNames, Ascii.toLowerCase(cursorGranularity));
+                Ascii.toLowerCase(rawNames.get(0)),
+                Ascii.toLowerCase(rawNames.get(1)));
+      }
+      cachedSelectSettingGestureNames = adjustSelectedSettingGestureNames;
     }
+    return adjustSelectedSettingGestureNames;
   }
 
   /** Change the value of the selected setting or scroll forward/backard of the seeker. */
   public void adjustSelectedSetting(EventId eventId, boolean isNext) {
-    Setting currentSetting = getCurrentSetting();
+    Setting currentSetting = getCurrentSetting(context, prefs);
     if (isContextualSetting(currentSetting)
         && !accessibilityFocusMonitor.hasAccessibilityFocus(/* useInputFocusIfEmpty= */ false)) {
       restoreSetting();
-      currentSetting = getCurrentSetting();
+      currentSetting = getCurrentSetting(context, prefs);
     }
-    analytics.onSelectorActionEvent(currentSetting);
+    if (!ACTIONS.equals(currentSetting)) {
+      // Log for ACTION is counted when double-tapping.
+      analytics.onSelectorActionEvent(currentSetting);
+    }
 
     switch (currentSetting) {
       case SPEECH_RATE:
@@ -973,7 +1232,8 @@ public class SelectorController {
         changeVerbosity(eventId, isNext);
         return;
       case PUNCTUATION:
-        switchOnOrOffPunctuation(eventId);
+        // switchOnOrOffPunctuation(eventId);
+        switchSpeakPunctuationVerbosity(eventId);
         return;
       case HIDE_SCREEN:
         showOrHideScreen(eventId);
@@ -1003,6 +1263,7 @@ public class SelectorController {
       case GRANULARITY_CONTROLS:
       case GRANULARITY_LANDMARKS:
       case GRANULARITY_WINDOWS:
+      case GRANULARITY_CONTAINERS:
       case GRANULARITY_DEFAULT:
         {
           List<Granularity> granularities = Granularity.getFromSetting(currentSetting);
@@ -1014,10 +1275,7 @@ public class SelectorController {
               accessibilityFocusMonitor.getAccessibilityFocus(false);
           boolean hasNavigableWebContent = WebInterfaceUtils.hasNavigableWebContent(node);
           for (Granularity granularity : granularities) {
-            if ((granularity.granularityType == GRANULARITY_FOR_NATIVE_NODE
-                    && hasNavigableWebContent)
-                || (granularity.granularityType == GRANULARITY_FOR_WEB_NODE
-                    && !hasNavigableWebContent)) {
+            if (!Granularity.isValid(granularity, hasNavigableWebContent)) {
               continue;
             }
             moveAtGranularity(eventId, granularity, isNext);
@@ -1031,6 +1289,9 @@ public class SelectorController {
       case ADJUSTABLE_WIDGET:
         handleAdjustable(eventId, isNext);
         return;
+      case GRANULARITY_TYPO:
+        navigateTypo(eventId, isNext);
+        return;
     }
   }
 
@@ -1039,7 +1300,6 @@ public class SelectorController {
     if (!accessibilityFocusMonitor.hasAccessibilityFocus(/* useInputFocusIfEmpty= */ false)) {
       return;
     }
-    analytics.onSelectorActionEvent(getCurrentSetting());
 
     // Check if the SwitchPreference is on for ACTION setting.
     if (!prefs.getBoolean(
@@ -1049,40 +1309,25 @@ public class SelectorController {
           eventId, Feedback.speech(context.getString(R.string.actions_setting_not_enabled)));
       return;
     }
-    if (currentActionId == NO_SETTING_INSERTED) {
-      // Hint needs to be before text in talkback structure.
+
+    @Nullable AccessibilityNodeInfoCompat node =
+        accessibilityFocusMonitor.getAccessibilityFocus(false);
+    if (node == null) {
+      return;
+    }
+    if (!performActionOnNodeOrAncestor(eventId, node)) {
       pipeline.returnFeedback(
           eventId,
           Feedback.Part.builder()
               .setSpeech(
                   Speech.builder()
                       .setAction(Speech.Action.SPEAK)
-                      .setText(context.getString(R.string.no_action_selected))
+                      .setText(context.getString(R.string.action_not_supported))
                       .setHintSpeakOptions(
                           SpeechController.SpeakOptions.create()
                               .setFlags(FeedbackItem.FLAG_NO_HISTORY))
                       .setHint(context.getString(R.string.hint_select_action))
                       .build()));
-      return;
-    }
-
-    @Nullable AccessibilityNodeInfoCompat node =
-        accessibilityFocusMonitor.getAccessibilityFocus(false);
-    if (node != null) {
-      if (!performActionOnNodeOrAncestor(eventId, node)) {
-        pipeline.returnFeedback(
-            eventId,
-            Feedback.Part.builder()
-                .setSpeech(
-                    Speech.builder()
-                        .setAction(Speech.Action.SPEAK)
-                        .setText(context.getString(R.string.action_not_supported))
-                        .setHintSpeakOptions(
-                            SpeechController.SpeakOptions.create()
-                                .setFlags(FeedbackItem.FLAG_NO_HISTORY))
-                        .setHint(context.getString(R.string.hint_select_action))
-                        .build()));
-      }
     }
   }
 
@@ -1103,25 +1348,48 @@ public class SelectorController {
       return false;
     }
 
-    AccessibilityNodeInfoCompat actionNode =
-        AccessibilityNodeInfoUtils.getSelfOrMatchingAncestor(node, FILTER_HAS_MENU_ACTION);
-    if (actionNode == null) {
+    // Always perform click action on the node.
+    if (currentActionId.itemId() == AccessibilityNodeInfoCompat.ACTION_CLICK) {
+      pipeline.returnFeedback(eventId, Feedback.focus(CLICK_NODE).setTarget(node));
+      return true;
+    }
+
+    List<ContextMenuItem> menuItems =
+        nodeMenuCreator.getNodeMenuByRule(
+            RULE_CUSTOM_ACTION, context, node, /* includeAncestors= */ true);
+    if (menuItems.isEmpty()) {
       return false;
     }
 
-    // Only actions from the lowest-matching-ancestor will be used.
-    for (AccessibilityActionCompat action : actionNode.getActionList()) {
-      if (currentActionId == action.getId()) {
-        pipeline.returnFeedback(eventId, Feedback.nodeAction(actionNode, currentActionId));
-        return true;
-      }
+    Optional<ContextMenuItem> item =
+        menuItems.stream()
+            .filter(i -> i.getContextMenuItemId().equals(currentActionId))
+            .findFirst();
+    if (item.isPresent()) {
+      analytics.onSelectorActionEvent(getCurrentSetting(context, prefs));
+      return item.get().onClickPerformed();
+    } else {
+      return false;
     }
-    return false;
+  }
+
+  private void resetActionMenuToDefault() {
+    currentActionId =
+        ContextMenuItemId.create(
+            AccessibilityNodeInfoCompat.ACTION_CLICK,
+            context.getString(R.string.shortcut_perform_click_action));
   }
 
   private void handleAdjustable(EventId eventId, boolean isNext) {
     pipeline.returnFeedback(
         eventId, Feedback.adjustValue(isNext ? DECREASE_VALUE : INCREASE_VALUE));
+  }
+
+  private void navigateTypo(EventId eventId, boolean isNext) {
+    // Sets granularity and locks navigate within the focused node.
+    // When using braille keyboard, accessibility focus is null so use input focus.
+    pipeline.returnFeedback(
+        eventId, Feedback.navigateTypo(isNext, /* useInputFocusIfEmpty= */ true));
   }
 
   /** Moves to the next or previous at specific granularity. */
@@ -1130,13 +1398,13 @@ public class SelectorController {
     pipeline.returnFeedback(eventId, Feedback.granularity(granularity.cursorGranularity));
 
     Setting setting = Granularity.getSettingFromCursorGranularity(granularity.cursorGranularity);
-    boolean setToWindow = setting.equals(GRANULARITY_WINDOWS);
     boolean result =
         pipeline.returnFeedback(
             eventId,
             Feedback.focusDirection(isNext ? SEARCH_FOCUS_FORWARD : SEARCH_FOCUS_BACKWARD)
                 .setInputMode(INPUT_MODE_TOUCH)
-                .setToWindow(setToWindow)
+                .setToWindow(setting.equals(GRANULARITY_WINDOWS))
+                .setToContainer(setting.equals(GRANULARITY_CONTAINERS))
                 .setDefaultToInputFocus(true)
                 .setScroll(true)
                 .setWrap(true));
@@ -1233,6 +1501,34 @@ public class SelectorController {
         getSelectSettingGestures());
     showQuickMenuActionOverlay(
         eventId, context.getString(!punctuationOn ? R.string.value_on : R.string.value_off));
+  }
+
+  private void switchSpeakPunctuationVerbosity(EventId eventId) {
+    Resources res = context.getResources();
+    int punctuationLevel =
+        Integer.parseInt(
+            SharedPreferencesUtils.getStringPref(
+                prefs,
+                res,
+                R.string.pref_punctuation_verbosity,
+                R.string.pref_punctuation_verbosity_default));
+    analytics.onManuallyChangeSetting(
+        res.getString(R.string.pref_use_audio_focus_key),
+        TalkBackAnalytics.TYPE_SELECTOR, /* isPending */
+        true);
+    punctuationLevel++;
+    punctuationLevel %= 3;
+    String[] punctuationValues =
+        context.getResources().getStringArray(R.array.pref_punctuation_values);
+    String[] punctuationEntries =
+        context.getResources().getStringArray(R.array.pref_punctuation_entries);
+    SharedPreferencesUtils.putStringPref(
+        prefs, res, R.string.pref_punctuation_verbosity, punctuationValues[punctuationLevel]);
+    announceSetting(
+        eventId,
+        context.getString(R.string.punctuation_state, punctuationEntries[punctuationLevel]),
+        getSelectSettingGestures());
+    showQuickMenuActionOverlay(eventId, punctuationEntries[punctuationLevel]);
   }
 
   /** Validate the verbosity index and set verbosity string if necessary */
@@ -1336,98 +1632,123 @@ public class SelectorController {
     @Nullable AccessibilityNodeInfoCompat node =
         accessibilityFocusMonitor.getAccessibilityFocus(false);
     if (node != null) {
-      List<AccessibilityActionCompat> actions = new ArrayList<>();
-      int currentActionIndex = populateActionItemsForNode(node, actions);
+      List<ContextMenuItem> menuItems = new ArrayList<>();
+      int currentActionIndex = populateActionItemsForNode(node, menuItems);
       // This could happen when the accessibility focused node changed.
-      int actionSize = actions.size();
+      int actionSize = menuItems.size();
       if (actionSize == 0) {
         announceSetting(
             eventId, context.getString(R.string.no_action_available), getSelectSettingGestures());
         return;
       }
-      final AccessibilityActionCompat action;
+      final ContextMenuItem item;
       if (currentActionIndex == -1) {
-        action = actions.get(0);
+        item = menuItems.get(0);
       } else {
         if (isNext) {
-          action = actions.get((currentActionIndex + 1) % actionSize);
+          item = menuItems.get((currentActionIndex + 1) % actionSize);
         } else {
-          action = actions.get((currentActionIndex - 1 + actionSize) % actionSize);
+          item = menuItems.get((currentActionIndex - 1 + actionSize) % actionSize);
         }
       }
-      currentActionId = action.getId();
-      displayText = action.getLabel();
+      currentActionId = item.getContextMenuItemId();
+      displayText = item.getTitle();
+
+      if (currentActionId.itemId() == AccessibilityNodeInfoCompat.ACTION_CLICK) {
+        requestServiceHandlesDoubleTap(eventId, false);
+      } else {
+        // Actions request FLAG_SERVICE_HANDLES_DOUBLE_TAP to allow triggering by double-tap.
+        requestServiceHandlesDoubleTap(eventId, true);
+      }
+
       if (displayText == null) {
-        if (currentActionId == AccessibilityNodeInfoCompat.ACTION_DISMISS) {
-          displayText = context.getString(R.string.title_action_dismiss);
-        } else if (currentActionId == AccessibilityNodeInfoCompat.ACTION_EXPAND) {
-          displayText = context.getString(R.string.title_action_expand);
-        } else if (currentActionId == AccessibilityNodeInfoCompat.ACTION_COLLAPSE) {
-          displayText = context.getString(R.string.title_action_collapse);
-        } else {
-          // This should not happen as when we populate the actions, we already check the label.
-          displayText = context.getString(R.string.value_unlabelled);
-        }
+        displayText = context.getString(R.string.value_unlabelled);
       }
-      announceSetting(eventId, displayText.toString(), getSelectSettingGestures());
+
+      announceSetting(
+          eventId,
+          displayText,
+          item.getItemId() == R.id.typo_suggestions_menu
+              ? context.getString(R.string.use_spelling_suggestion_hint)
+              : context.getString(R.string.use_action_hint));
       showQuickMenuActionOverlay(eventId, displayText);
     }
   }
 
   /**
-   * Populate eligible actions for the node. If this node doesn t'have any eligible actions, search
+   * Populate eligible actions for the node. If this node doesn't have any eligible actions, search
    * it parents until eligible actions are found or until all the parents are searched.
    *
    * @param node current node.
-   * @param actions list of eligible action.
-   * @return if we find an action with the same id of currentActionId, return the index of it in the
-   *     actions list. Otherwise we return -1 to indicate action with the same id of currentActionId
-   *     is not found.
+   * @param menuItems list of eligible action.
+   * @return the index of the action that has the same id with {@code currentActionIndex}, otherwise
+   *     -1
    */
   private int populateActionItemsForNode(
-      @Nullable AccessibilityNodeInfoCompat node, List<AccessibilityActionCompat> actions) {
+      @Nullable AccessibilityNodeInfoCompat node, List<ContextMenuItem> menuItems) {
     if (node == null) {
       return -1;
     }
 
-    AccessibilityNodeInfoCompat actionNode = null;
-    actionNode = AccessibilityNodeInfoUtils.getSelfOrMatchingAncestor(node, FILTER_HAS_MENU_ACTION);
-    if (actionNode == null) {
+    List<ContextMenuItem> actions =
+        nodeMenuCreator.getNodeMenuByRule(
+            RULE_CUSTOM_ACTION, context, node, /* includeAncestors= */ true);
+    if (actions.isEmpty()) {
       return -1;
     }
 
-    int currentActionIndex = -1;
-    for (AccessibilityActionCompat action : actionNode.getActionList()) {
-      if (shouldIncludeAction(action)) {
-        if (action.getId() == currentActionId) {
-          currentActionIndex = actions.size();
-        }
-        actions.add(action);
+    // Add default action ACTION_CLICK to the menu.
+    menuItems.add(
+        ContextMenu.createMenuItem(
+            context,
+            Menu.NONE,
+            AccessibilityNodeInfoCompat.ACTION_CLICK,
+            Menu.NONE,
+            context.getString(R.string.shortcut_perform_click_action)));
+
+    int currentActionIndex = 0; // Point to the default action "Click".
+    for (ContextMenuItem action : actions) {
+      if (action.getContextMenuItemId().equals(currentActionId)) {
+        currentActionIndex = menuItems.size();
       }
+      menuItems.add(action);
     }
     return currentActionIndex;
   }
 
-  private static boolean shouldIncludeAction(AccessibilityActionCompat action) {
-    int id = action.getId();
-    return ((AccessibilityNodeInfoUtils.isCustomAction(action) && (action.getLabel() != null))
-        || (id == AccessibilityNodeInfoCompat.ACTION_DISMISS)
-        || (id == AccessibilityNodeInfoCompat.ACTION_EXPAND)
-        || (id == AccessibilityNodeInfoCompat.ACTION_COLLAPSE));
+  private boolean isContextualSetting(Setting setting) {
+    if (setting == null) {
+      return false;
+    }
+    return contextualSettings.stream().anyMatch((s) -> s.getSetting() == setting);
   }
 
-  private static boolean isContextualSetting(Setting setting) {
-    return CONTEXTUAL_SETTINGS.stream().anyMatch((s) -> s.getSetting() == setting);
+  private void requestServiceHandlesDoubleTap(EventId eventId, boolean enableFlag) {
+    if (enableFlag) {
+      if (!hasRequestServiceHandlesDoubleTap) {
+        pipeline.returnFeedback(
+            eventId, Feedback.requestServiceFlag(ENABLE_FLAG, FLAG_SERVICE_HANDLES_DOUBLE_TAP));
+        hasRequestServiceHandlesDoubleTap = true;
+      }
+    } else {
+      if (hasRequestServiceHandlesDoubleTap) {
+        pipeline.returnFeedback(
+            eventId, Feedback.requestServiceFlag(DISABLE_FLAG, FLAG_SERVICE_HANDLES_DOUBLE_TAP));
+        hasRequestServiceHandlesDoubleTap = false;
+      }
+    }
   }
 
-  private static Optional<ContextualSetting> findContextualSetting(Setting setting) {
-    return CONTEXTUAL_SETTINGS.stream().filter((s) -> s.getSetting() == setting).findFirst();
+  private Optional<ContextualSetting> findContextualSetting(Setting setting) {
+    return contextualSettings.stream().filter((s) -> s.getSetting() == setting).findFirst();
   }
 
-  private static Optional<ContextualSetting> getMatchedContextualSetting(
-      Context context, AccessibilityNodeInfoCompat node) {
-    return CONTEXTUAL_SETTINGS.stream()
-        .filter((s) -> s.shouldActivateSetting(context, node))
+  private Optional<ContextualSetting> getMatchedContextualSettingForActivation(
+      Context context, AccessibilityNodeInfoCompat node, List<Setting> hiddenSettings) {
+    return contextualSettings.stream()
+        .filter(
+            (s) ->
+                !hiddenSettings.contains(s.getSetting()) && s.shouldActivateSetting(context, node))
         .findFirst();
   }
 
@@ -1525,7 +1846,7 @@ public class SelectorController {
         context.getString(R.string.shortcut_value_select_previous_setting);
     String selectNextSetting = context.getString(R.string.shortcut_value_select_next_setting);
 
-    if (FeatureSupport.isWatch(context)) {
+    if (formFactorUtils.isAndroidWear()) {
       // Watch never uses multi-finger and won't show surrounding icons.
       pipeline.returnFeedback(
           eventId,
@@ -1565,6 +1886,7 @@ public class SelectorController {
               message,
               isSwipeUpDownAndDownUpForSelector));
     }
+    selectorEventNotifier.onSelectorOverlayShown(message);
   }
 
   private void showQuickMenuActionOverlay(EventId eventId, CharSequence message) {
@@ -1573,7 +1895,7 @@ public class SelectorController {
     String selectedSettingNextAction =
         context.getString(R.string.shortcut_value_selected_setting_next_action);
     boolean isSwipeUpDownForSelector =
-        !FeatureSupport.isWatch(context)
+        !formFactorUtils.isAndroidWear()
             && selectedSettingPreviousAction.equals(
                 prefs.getString(
                     context.getString(R.string.pref_shortcut_up_key),
@@ -1587,5 +1909,6 @@ public class SelectorController {
     pipeline.returnFeedback(
         eventId,
         Feedback.showSelectorUI(SELECTOR_ITEM_ACTION_OVERLAY, message, isSwipeUpDownForSelector));
+    selectorEventNotifier.onSelectorOverlayShown(message);
   }
 }

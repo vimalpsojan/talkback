@@ -17,6 +17,7 @@
 package com.google.android.accessibility.utils.output;
 
 import android.text.SpannableStringBuilder;
+import com.google.android.accessibility.utils.AccessibilityEventUtils;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.StringBuilderUtils;
 import com.google.android.accessibility.utils.output.SpeechController.UtteranceCompleteRunnable;
@@ -93,6 +94,9 @@ public class FeedbackItem {
    */
   public static final int FLAG_SOURCE_IS_VOLUME_CONTROL = 0x2000;
 
+  /** Flag to indicate that the aggressive chunking is applied to the feedback item. */
+  public static final int FLAG_CHUNKING_APPLIED = 0x4000;
+
   /** Unique ID defining this generated feedback */
   private String mUtteranceId = "";
 
@@ -109,6 +113,9 @@ public class FeedbackItem {
    * interruptItemsThatCanIgnoreInterrupts is true or if the parameter is not provided.
    */
   private boolean mCanIgnoreInterrupts;
+
+  /** Flag indicating that this FeedbackItem will flush the global TTS queue. */
+  private boolean flushGlobalTtsQueue = true;
 
   /** Flags defining the treatment of this FeedbackItem. */
   private int mFlags;
@@ -191,7 +198,7 @@ public class FeedbackItem {
    * @return all text contained by this item, or {@code null} if no fragments exist.
    */
   public @Nullable CharSequence getAggregateText() {
-    if (mFragments.size() == 0) {
+    if (mFragments.isEmpty()) {
       return null;
     } else if (mFragments.size() == 1) {
       return mFragments.get(0).getText();
@@ -199,10 +206,11 @@ public class FeedbackItem {
 
     final SpannableStringBuilder sb = new SpannableStringBuilder();
     for (FeedbackFragment fragment : mFragments) {
-      StringBuilderUtils.appendWithSeparator(sb, fragment.getText());
+      StringBuilderUtils.appendWithSeparator(
+          sb, /* wrapSeparatorWithIdentifierSpan= */ true, fragment.getText());
     }
 
-    return sb.toString();
+    return sb;
   }
 
   /**
@@ -279,6 +287,25 @@ public class FeedbackItem {
    */
   public void setCanIgnoreInterrupts(boolean canIgnoreInterrupts) {
     mCanIgnoreInterrupts = canIgnoreInterrupts;
+  }
+
+  /**
+   * Sets whether this item should interrupt the global TTS queue.
+   *
+   * @param flushGlobalTtsQueue {@code true} if this item should interrupt the global TTS queue
+   */
+  public void setFlushGlobalTtsQueue(boolean flushGlobalTtsQueue) {
+    this.flushGlobalTtsQueue = flushGlobalTtsQueue;
+  }
+
+  /**
+   * Returns {@code true} if this item should interrupt global TTS queue.
+   *
+   * <p>Note: Items should not interrupt global TTS queue if the queue mode is {@link
+   * SpeechController#QUEUE_MODE_QUEUE}.
+   */
+  public boolean shouldFlushGlobalTtsQueue() {
+    return flushGlobalTtsQueue;
   }
 
   /**
@@ -362,6 +389,8 @@ public class FeedbackItem {
         + mFragments
         + ", uninterruptible:"
         + mIsUninterruptible
+        + ", flushGlobalTtsQueue:"
+        + flushGlobalTtsQueue
         + ", flags:"
         + mFlags
         + ", creationTime:"
@@ -371,5 +400,44 @@ public class FeedbackItem {
 
   public int getFlags() {
     return this.mFlags;
+  }
+
+  public static @Nullable String flagsToString(int flags) {
+    return AccessibilityEventUtils.flagsToString(flags, FeedbackItem::flagToString);
+  }
+
+  public static @Nullable String flagToString(int flag) {
+    switch (flag) {
+      case FLAG_NO_HISTORY:
+        return "FLAG_NO_HISTORY";
+      case FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE:
+        return "FLAG_FORCE_FEEDBACK_EVEN_IF_AUDIO_PLAYBACK_ACTIVE";
+      case FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE:
+        return "FLAG_FORCE_FEEDBACK_EVEN_IF_MICROPHONE_ACTIVE";
+      case FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE:
+        return "FLAG_FORCE_FEEDBACK_EVEN_IF_SSB_ACTIVE";
+      case FLAG_FORCE_FEEDBACK_EVEN_IF_PHONE_CALL_ACTIVE:
+        return "FLAG_FORCE_FEEDBACK_EVEN_IF_PHONE_CALL_ACTIVE";
+      case FLAG_ADVANCE_CONTINUOUS_READING:
+        return "FLAG_ADVANCE_CONTINUOUS_READING";
+      case FLAG_NO_SPEECH:
+        return "FLAG_NO_SPEECH";
+      case FLAG_SKIP_DUPLICATE:
+        return "FLAG_SKIP_DUPLICATE";
+      case FLAG_CLEAR_QUEUED_UTTERANCES_WITH_SAME_UTTERANCE_GROUP:
+        return "FLAG_CLEAR_QUEUED_UTTERANCES_WITH_SAME_UTTERANCE_GROUP";
+      case FLAG_INTERRUPT_CURRENT_UTTERANCE_WITH_SAME_UTTERANCE_GROUP:
+        return "FLAG_INTERRUPT_CURRENT_UTTERANCE_WITH_SAME_UTTERANCE_GROUP";
+      case FLAG_NO_DEVICE_SLEEP:
+        return "FLAG_NO_DEVICE_SLEEP";
+      case FLAG_FORCE_FEEDBACK:
+        return "FLAG_FORCE_FEEDBACK";
+      case FLAG_SOURCE_IS_VOLUME_CONTROL:
+        return "FLAG_SOURCE_IS_VOLUME_CONTROL";
+      case FLAG_CHUNKING_APPLIED:
+        return "FLAG_CHUNKING_APPLIED";
+      default:
+        return null;
+    }
   }
 }

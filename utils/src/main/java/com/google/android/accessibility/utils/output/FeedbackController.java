@@ -24,20 +24,25 @@ import android.content.res.Resources.NotFoundException;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.SoundPool;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.SparseIntArray;
 import com.google.android.accessibility.utils.BuildVersionUtils;
-import com.google.android.accessibility.utils.FeatureSupport;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.R;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** A feedback controller that caches sounds for quicker playback. */
 public class FeedbackController {
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  // Constants
 
   private static final String TAG = "FeedbackController";
 
@@ -49,6 +54,11 @@ public class FeedbackController {
 
   /** Maximum number of concurrent audio streams. */
   private static final int MAX_STREAMS = 10;
+
+  public static final long NO_SEPARATION = 0;
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  // Member data
 
   /** The parent context. */
   private final Context mContext;
@@ -65,6 +75,8 @@ public class FeedbackController {
   /** Map from the resource IDs of loaded sounds to SoundPool sound IDs. */
   private final SparseIntArray mSoundIds = new SparseIntArray();
 
+  private final HapticPatternParser parser;
+
   /** The volume adjustment for sound feedback. */
   private float mVolumeAdjustment = 1.0f;
 
@@ -72,6 +84,11 @@ public class FeedbackController {
   private boolean mHapticEnabled;
 
   private final Set<HapticFeedbackListener> mHapticFeedbackListeners = new HashSet<>();
+
+  private final @NonNull HashMap<Integer, Long> resIdToLastPlayUptimeMillisec = new HashMap<>();
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  // Construction
 
   public FeedbackController(Context context) {
     this(context, createSoundPool(), (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE));
@@ -82,7 +99,11 @@ public class FeedbackController {
     mResources = context.getResources();
     mSoundPool = soundPool;
     mVibrator = vibrator;
+    parser = new HapticPatternParser(mVibrator);
   }
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  // Methods
 
   /**
    * Plays the vibration pattern associated with the given resource ID.
@@ -104,20 +125,15 @@ public class FeedbackController {
       return false;
     }
 
-    final long[] pattern = new long[patternArray.length];
-    for (int i = 0; i < patternArray.length; i++) {
-      pattern[i] = patternArray[i];
-    }
+    VibrationEffect effect = parser.parse(patternArray);
 
     long nanoTime = System.nanoTime();
     for (HapticFeedbackListener listener : mHapticFeedbackListeners) {
       listener.onHapticFeedbackStarting(nanoTime);
     }
-    if (FeatureSupport.supportVibrationEffect()) {
-      mVibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
-    } else {
-      mVibrator.vibrate(pattern, -1);
-    }
+
+    mVibrator.vibrate(effect);
+
     return true;
   }
 
@@ -147,6 +163,28 @@ public class FeedbackController {
    */
   public void playAuditory(int resId, @Nullable EventId eventId) {
     playAuditory(resId, 1.0f /* rate */, 1.0f /* volume */, eventId);
+  }
+
+  /** Plays audio-resource only if it has not been played in the last separationMillisec. */
+  public void playAuditory(
+      int resId,
+      final float rate,
+      float volume,
+      @Nullable EventId eventId,
+      long separationMillisec) {
+    if (separationMillisec != NO_SEPARATION) {
+      @Nullable Long lastPlayUptimeMillisec = resIdToLastPlayUptimeMillisec.get(resId);
+      long nowUptimeMillisec = SystemClock.uptimeMillis();
+      // If time to play... update last-play-time... else... skip playing.
+      if ((lastPlayUptimeMillisec == null)
+          || (separationMillisec < nowUptimeMillisec - lastPlayUptimeMillisec)) {
+        resIdToLastPlayUptimeMillisec.put(resId, nowUptimeMillisec);
+      } else {
+        return;
+      }
+    }
+
+    playAuditory(resId, rate, volume, eventId);
   }
 
   /**

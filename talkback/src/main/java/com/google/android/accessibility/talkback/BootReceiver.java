@@ -21,7 +21,7 @@ import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRAC
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import com.google.android.accessibility.utils.BuildVersionUtils;
+import android.content.IntentFilter;
 import com.google.android.accessibility.utils.Performance.EventId;
 
 public class BootReceiver extends BroadcastReceiver {
@@ -43,14 +43,21 @@ public class BootReceiver extends BroadcastReceiver {
         service.onLockedBootCompleted(eventId);
         break;
       case Intent.ACTION_BOOT_COMPLETED:
-        if (!BuildVersionUtils.isAtLeastN()) {
-          // Pre-N devices will never get LOCKED_BOOT, so we need to do the locked-boot
-          // initialization here right before we do the unlocked-boot initialization.
-          service.onLockedBootCompleted(eventId);
-        }
         service.onUnlockedBootCompleted();
+        break;
+      case Intent.ACTION_SHUTDOWN:
+        service.onShutDown();
         break;
       default: // fall out
     }
+  }
+
+  public static IntentFilter getFilter() {
+    final IntentFilter intentFilter = new IntentFilter();
+    intentFilter.addAction(Intent.ACTION_LOCKED_BOOT_COMPLETED);
+    intentFilter.addAction(Intent.ACTION_BOOT_COMPLETED);
+    intentFilter.addAction(Intent.ACTION_SHUTDOWN);
+    intentFilter.addCategory(Intent.CATEGORY_DEFAULT);
+    return intentFilter;
   }
 }

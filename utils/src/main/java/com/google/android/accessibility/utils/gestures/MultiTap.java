@@ -20,6 +20,8 @@ import android.content.Context;
 import android.os.Handler;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
+import com.google.android.accessibility.utils.Performance.EventId;
+import com.google.android.accessibility.utils.R;
 
 /**
  * This class matches multi-tap gestures. The number of taps for each instance is specified in the
@@ -50,8 +52,9 @@ public class MultiTap extends GestureMatcher {
     targetTaps = taps;
     doubleTapSlop = ViewConfiguration.get(context).getScaledDoubleTapSlop();
     touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
-    tapTimeout = ViewConfiguration.getTapTimeout();
-    doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout();
+    int deltaTapTimeout = context.getResources().getInteger(R.integer.config_tap_timeout_delta);
+    tapTimeout = ViewConfiguration.getTapTimeout() + deltaTapTimeout;
+    doubleTapTimeout = GestureConfiguration.DOUBLE_TAP_TIMEOUT_MS;
     clear();
   }
 
@@ -66,7 +69,7 @@ public class MultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onDown(MotionEvent event) {
+  protected void onDown(EventId eventId, MotionEvent event) {
     long time = event.getEventTime();
     long timeDelta = time - lastUpTime;
     if (timeDelta > doubleTapTimeout) {
@@ -80,6 +83,7 @@ public class MultiTap extends GestureMatcher {
     }
     if (!isInsideSlop(event, doubleTapSlop)) {
       cancelGesture(event);
+      return;
     }
     baseX = event.getX();
     baseY = event.getY();
@@ -93,22 +97,16 @@ public class MultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onUp(MotionEvent event) {
-    long time = event.getEventTime();
-    long timeDelta = time - lastDownTime;
-    if (timeDelta > tapTimeout) {
+  protected void onUp(EventId eventId, MotionEvent event) {
+    if (!isValidUpEvent(event)) {
       cancelGesture(event);
       return;
-    }
-    lastUpTime = time;
-    if (!isInsideSlop(event, touchSlop)) {
-      cancelGesture(event);
     }
     if (getState() == STATE_GESTURE_STARTED || getState() == STATE_CLEAR) {
       currentTaps++;
       if (currentTaps == targetTaps) {
         // Done.
-        completeGesture(event);
+        completeGesture(eventId, event);
         return;
       }
       // Needs more taps.
@@ -119,19 +117,19 @@ public class MultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onMove(MotionEvent event) {
+  protected void onMove(EventId eventId, MotionEvent event) {
     if (!isInsideSlop(event, touchSlop)) {
       cancelGesture(event);
     }
   }
 
   @Override
-  protected void onPointerDown(MotionEvent event) {
+  protected void onPointerDown(EventId eventId, MotionEvent event) {
     cancelGesture(event);
   }
 
   @Override
-  protected void onPointerUp(MotionEvent event) {
+  protected void onPointerUp(EventId eventId, MotionEvent event) {
     cancelGesture(event);
   }
 
@@ -155,6 +153,19 @@ public class MultiTap extends GestureMatcher {
     }
     final double moveDelta = Math.hypot(deltaX, deltaY);
     return moveDelta <= slop;
+  }
+
+  protected boolean isValidUpEvent(MotionEvent upEvent) {
+    long time = upEvent.getEventTime();
+    long timeDelta = time - lastDownTime;
+    if (timeDelta > tapTimeout) {
+      return false;
+    }
+    lastUpTime = time;
+    if (!isInsideSlop(upEvent, touchSlop)) {
+      return false;
+    }
+    return true;
   }
 
   @Override

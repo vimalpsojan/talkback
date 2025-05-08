@@ -16,12 +16,15 @@
 
 package com.google.android.accessibility.utils;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
+import android.os.Bundle;
 import android.preference.PreferenceFragment;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
@@ -30,9 +33,11 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceDialogFragmentCompat;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
+import com.google.android.libraries.accessibility.utils.device.DeviceUtils;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Utilities for Android Preference Screens. */
@@ -151,7 +156,7 @@ public final class PreferenceSettingsUtils {
     Intent intent = new Intent(Intent.ACTION_VIEW, uri);
     Activity activity = fragment.getActivity();
     if (activity != null) {
-      if (!systemCanHandleIntent(fragment.getActivity(), intent)) {
+      if (!systemCanHandleWebIntent(activity, intent)) {
         intent = new Intent(activity, WebActivity.class);
         intent.setData(uri);
       }
@@ -161,12 +166,20 @@ public final class PreferenceSettingsUtils {
   }
 
   /** Checks if the intent could be performed by a system. */
-  private static boolean systemCanHandleIntent(Activity activity, Intent intent) {
+  private static boolean systemCanHandleWebIntent(
+      @Nullable Activity activity, @NonNull Intent intent) {
     if (activity == null) {
       return false;
     }
 
+    if (DeviceUtils.isTv(activity)) {
+      // Prevent false positive due to BrowserStub on Android TV.
+      return false;
+    }
+
     PackageManager manager = activity.getPackageManager();
+    // The permission is preferable but not strictly necessary.
+    @SuppressLint("QueryPermissionsNeeded")
     List<ResolveInfo> infos = manager.queryIntentActivities(intent, 0);
     return infos != null && !infos.isEmpty();
   }
@@ -216,5 +229,19 @@ public final class PreferenceSettingsUtils {
     }
     Context context = fragment.getContext();
     return fragment.findPreference(context.getString(prefKeyId));
+  }
+
+  /**
+   * Attaches a Settings Highlight description {@link Bundle} with the given {@link Intent}.
+   *
+   * <p>Only works on Pixel devices; has no effect on other devices.
+   *
+   * <p>For more information, see <a
+   * href="https://docs.google.com/document/d/1LnnoitwKYd-dNxQ7HE9PRynBp_vLa2aT-s-3D4VD8u4">doc</a>
+   */
+  public static void attachSettingsHighlightBundle(Intent intent, ComponentName componentName) {
+    Bundle bundle = new Bundle();
+    bundle.putString(":settings:fragment_args_key", componentName.flattenToString());
+    intent.putExtra(":settings:show_fragment_args", bundle);
   }
 }

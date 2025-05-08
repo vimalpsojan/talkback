@@ -16,9 +16,12 @@
 
 package com.google.android.accessibility.utils;
 
+import static com.google.android.accessibility.utils.caption.ImageCaptionUtils.CaptionType.ICON_LABEL;
+
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.utils.caption.ImageCaptionStorage;
 import com.google.android.accessibility.utils.caption.ImageNode;
+import com.google.android.accessibility.utils.caption.Result;
 import com.google.android.accessibility.utils.labeling.Label;
 import com.google.android.accessibility.utils.labeling.LabelManager;
 import java.util.Locale;
@@ -39,11 +42,7 @@ public class ImageContents {
     this.imageCaptionStorage = imageCaptionStorage;
   }
 
-  /**
-   * Retrieves custom labels from the database.
-   *
-   * <p><strong>Note:</strong> Caller is responsible for recycling the node-argument.
-   */
+  /** Retrieves custom labels from the database. */
   public @Nullable String getLabel(AccessibilityNodeInfoCompat node) {
     if (labelManager == null) {
       return null;
@@ -52,28 +51,19 @@ public class ImageContents {
     return (label == null || label.getText() == null) ? null : label.getText();
   }
 
-  /**
-   * Retrieves the results of image captions from the cache.
-   *
-   * <p><strong>Note:</strong> Caller is responsible for recycling the node-argument.
-   */
-  public @Nullable CharSequence getCaptionResult(AccessibilityNodeInfoCompat node) {
+  /** Retrieves the results of image captions from the cache. */
+  public @Nullable Result getCaptionResult(AccessibilityNodeInfoCompat node) {
     if (imageCaptionStorage == null) {
       return null;
     }
     final @Nullable ImageNode captionResult = imageCaptionStorage.getCaptionResults(node);
-    return (captionResult == null || captionResult.getOcrText() == null)
+    return (captionResult == null || captionResult.getOcrTextResult() == null)
         ? null
-        : captionResult.getOcrText();
+        : captionResult.getOcrTextResult();
   }
 
-  /**
-   * Retrieves the localized label of the detected icon which matches the specified node.
-   *
-   * <p><strong>Note:</strong> Caller is responsible for recycling the node-argument.
-   */
-  public @Nullable CharSequence getDetectedIconLabel(
-      Locale locale, AccessibilityNodeInfoCompat node) {
+  /** Retrieves the localized label of the detected icon which matches the specified node. */
+  public @Nullable Result getDetectedIconLabel(Locale locale, AccessibilityNodeInfoCompat node) {
     if (imageCaptionStorage == null) {
       return null;
     }
@@ -90,25 +80,30 @@ public class ImageContents {
     if (detectedIconLabel == null) {
       ImageNode imageNode = imageCaptionStorage.getCaptionResults(node);
       if (imageNode != null) {
-        detectedIconLabel = imageNode.getDetectedIconLabel();
+        return imageNode.getDetectedIconLabelResult();
       }
+      return null;
     } else {
-      AccessibilityNode wrapNode = AccessibilityNode.obtainCopy(node);
-      try {
-        imageCaptionStorage.updateDetectedIconLabel(wrapNode, detectedIconLabel);
-      } finally {
-        AccessibilityNode.recycle("ImageContents.getDetectedIconLabel()", wrapNode);
-      }
+      Result detectedIconLabelResult = Result.create(ICON_LABEL, detectedIconLabel);
+      imageCaptionStorage.updateDetectedIconLabel(
+          AccessibilityNode.takeOwnership(node), detectedIconLabelResult);
+      return detectedIconLabelResult;
     }
-    return detectedIconLabel;
   }
 
-  /**
-   * Checks if the node needs a label.
-   *
-   * <p><strong>Note:</strong> Caller is responsible for recycling the node-argument.
-   */
+  /** Retrieves the results of image description from the cache. */
+  public @Nullable Result getImageDescriptionResult(AccessibilityNodeInfoCompat node) {
+    if (imageCaptionStorage == null) {
+      return null;
+    }
+    final @Nullable ImageNode captionResult = imageCaptionStorage.getCaptionResults(node);
+    return (captionResult == null || captionResult.getImageDescriptionResult() == null)
+        ? null
+        : captionResult.getImageDescriptionResult();
+  }
+
+  /** Checks if the node needs a label. */
   public boolean needsLabel(AccessibilityNodeInfoCompat node) {
-    return labelManager != null && labelManager.needsLabel(node);
+    return labelManager != null && labelManager.stateReader().needsLabel(node);
   }
 }

@@ -19,14 +19,19 @@ package com.google.android.accessibility.talkback.interpreters;
 import static android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED;
 
 import android.content.Context;
+import android.graphics.Point;
+import android.graphics.Rect;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
-import com.google.android.accessibility.compositor.AccessibilityFocusEventInterpretation;
-import com.google.android.accessibility.compositor.AccessibilityFocusEventInterpreter;
 import com.google.android.accessibility.talkback.ActorState;
 import com.google.android.accessibility.talkback.Interpretation;
+import com.google.android.accessibility.talkback.Interpretation.ManualScroll;
 import com.google.android.accessibility.talkback.Pipeline;
 import com.google.android.accessibility.talkback.actor.ImageCaptioner;
+import com.google.android.accessibility.talkback.analytics.TalkBackAnalytics;
+import com.google.android.accessibility.talkback.compositor.AccessibilityFocusEventInterpretation;
+import com.google.android.accessibility.talkback.compositor.AccessibilityFocusEventInterpreter;
+import com.google.android.accessibility.talkback.compositor.Compositor;
 import com.google.android.accessibility.talkback.focusmanagement.AccessibilityFocusMonitor;
 import com.google.android.accessibility.talkback.focusmanagement.FocusProcessorForScreenStateChange;
 import com.google.android.accessibility.talkback.focusmanagement.FocusProcessorForTapAndTouchExploration;
@@ -41,10 +46,13 @@ import com.google.android.accessibility.talkback.interpreters.InputFocusInterpre
 import com.google.android.accessibility.talkback.interpreters.ManualScrollInterpreter.ManualScrollInterpretation;
 import com.google.android.accessibility.talkback.interpreters.ManualScrollInterpreter.ScrolledViewChangeListener;
 import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
+import com.google.android.accessibility.utils.DisplayUtils;
+import com.google.android.accessibility.utils.FormFactorUtils;
 import com.google.android.accessibility.utils.Performance;
 import com.google.android.accessibility.utils.Performance.EventId;
-import com.google.android.accessibility.utils.caption.ImageCaptionUtils;
 import com.google.android.accessibility.utils.labeling.Label;
+import com.google.android.accessibility.utils.traversal.TraversalStrategy;
+import com.google.android.accessibility.utils.traversal.TraversalStrategy.SearchDirection;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -71,6 +79,7 @@ public class AccessibilityFocusInterpreter
 
   private Pipeline.InterpretationReceiver pipelineInterpretations;
   private ActorState actorState;
+  private final FormFactorUtils formFactorUtils;
 
   ////////////////////////////////////////////////////////////////////////////////////////////////
   // Construction methods
@@ -78,14 +87,38 @@ public class AccessibilityFocusInterpreter
   public AccessibilityFocusInterpreter(
       Context context,
       AccessibilityFocusMonitor accessibilityFocusMonitor,
-      ScreenStateMonitor.State screenState) {
+      ScreenStateMonitor.State screenState,
+      TalkBackAnalytics analytics) {
     this.context = context;
     this.accessibilityFocusMonitor = accessibilityFocusMonitor;
     this.screenState = screenState;
-    focusProcessorForTapAndTouchExploration = new FocusProcessorForTapAndTouchExploration();
+    focusProcessorForTapAndTouchExploration =
+        new FocusProcessorForTapAndTouchExploration(analytics);
     focusProcessorForScreenStateChange =
         new FocusProcessorForScreenStateChange(accessibilityFocusMonitor);
+    formFactorUtils = FormFactorUtils.getInstance();
   }
+
+  public void performSplitTap(EventId eventId) {
+    if (!focusProcessorForTapAndTouchExploration.performSplitTap(eventId)) {
+      // Check whether the FocusProcessorForTapAndTouchExploration#performSplitTap succeeds.
+      // TODO: Split-tap should be activated everywhere, not just IME.
+      // If FocusProcessorForTapAndTouchExploration#performSplitTap returns false (
+      // support the Text-Entry-Key for lift-to-type, we should enable this.
+      // performClick(eventId);
+    }
+  }
+
+  // TODO: Split-tap should be activated everywhere, not just IME.
+  //  private void performClick(EventId eventId) {
+  //    AccessibilityNodeInfoCompat currentA11yFocusedNode =
+  //        accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ false);
+  //    if (currentA11yFocusedNode != null) {
+  //      pipelineInterpretations.input(
+  //          eventId, /* event= */ null, Interpretation.Touch.create(LIFT,
+  // currentA11yFocusedNode));
+  //    }
+  //  }
 
   public void setPipeline(Pipeline.InterpretationReceiver pipeline) {
     this.pipelineInterpretations = pipeline;
@@ -132,15 +165,78 @@ public class AccessibilityFocusInterpreter
 
     AccessibilityNodeInfoCompat currentA11yFocusedNode =
         accessibilityFocusMonitor.getAccessibilityFocus(/* useInputFocusIfEmpty= */ false);
-    if (AccessibilityNodeInfoUtils.shouldFocusNode(currentA11yFocusedNode)) {
-      return;
+    if (shouldMoveFocus(currentA11yFocusedNode, interpretation.direction())) {
+
+      ManualScroll.Builder builder =
+          ManualScroll.builder()
+              .setDirection(interpretation.direction())
+              .setScreenState(screenState.getStableScreenState());
+      if (formFactorUtils.isAndroidWear()) {
+        builder.setCurrentFocusedNode(currentA11yFocusedNode);
+      }
+
+      pipelineInterpretations.input(
+          interpretation.eventId(), interpretation.event(), builder.build());
+    }
+  }
+
+  private boolean shouldMoveFocus(
+      AccessibilityNodeInfoCompat currentA11yFocusedNode, @SearchDirection int direction) {
+    if (formFactorUtils.isAndroidWear()) {
+      // In a Watch device, especially for a rounded screen, we have to move focus onto the next
+      // node before current focused node being invisible to mitigate the fighting between TB and
+      // a scrolling list view. To do so, we need to focus onto another node when the current
+      // focused node is close to borders and there is enough space for the new focused node.
+      return shouldFocusNextNodeForWatch(context, currentA11yFocusedNode, direction);
+    } else {
+      return !AccessibilityNodeInfoUtils.shouldFocusNode(currentA11yFocusedNode);
+    }
+  }
+
+  private static final float PARTIAL_INVISIBLE_TOP_RATIO = 0.15f;
+  private static final float PARTIAL_INVISIBLE_MID_RATIO = 0.5f;
+  private static final float PARTIAL_INVISIBLE_BOTTOM_RATIO = 0.85f;
+
+  private boolean shouldFocusNextNodeForWatch(
+      Context context, AccessibilityNodeInfoCompat node, @SearchDirection int direction) {
+    if (!formFactorUtils.isAndroidWear()) {
+      return false;
     }
 
-    pipelineInterpretations.input(
-        interpretation.eventId(),
-        interpretation.event(),
-        Interpretation.ManualScroll.create(
-            interpretation.direction(), screenState.getStableScreenState()));
+    if (node == null) {
+      return true;
+    }
+
+    Rect nodeRect = new Rect();
+    node.getBoundsInScreen(nodeRect);
+
+    Point screenPxSize = DisplayUtils.getScreenPixelSizeWithoutWindowDecor(context);
+    // When we scroll up the list, the screen will go down and the top content will be disappeared,
+    // and vice versa for scrolling down. Therefore, when we scroll up the list by gesture, we need
+    // to search focus forward.
+    return closeToBorder(direction, nodeRect, screenPxSize)
+        && hasEnoughSpaceForNextNode(direction, nodeRect, screenPxSize);
+  }
+
+  private boolean closeToBorder(@SearchDirection int direction, Rect nodeRect, Point screenPxSize) {
+    if (direction == TraversalStrategy.SEARCH_FOCUS_FORWARD) {
+      return (float) nodeRect.top < (float) screenPxSize.y * PARTIAL_INVISIBLE_TOP_RATIO;
+    } else if (direction == TraversalStrategy.SEARCH_FOCUS_BACKWARD) {
+      return (float) nodeRect.bottom > (float) screenPxSize.y * PARTIAL_INVISIBLE_BOTTOM_RATIO;
+    } else {
+      return false;
+    }
+  }
+
+  private boolean hasEnoughSpaceForNextNode(
+      @SearchDirection int direction, Rect nodeRect, Point screenPxSize) {
+    if (direction == TraversalStrategy.SEARCH_FOCUS_FORWARD) {
+      return (float) nodeRect.bottom < (float) screenPxSize.y * PARTIAL_INVISIBLE_MID_RATIO;
+    } else if (direction == TraversalStrategy.SEARCH_FOCUS_BACKWARD) {
+      return (float) nodeRect.top > (float) screenPxSize.y * PARTIAL_INVISIBLE_MID_RATIO;
+    } else {
+      return false;
+    }
   }
 
   /** Event-interpreter function, called by {@link InputFocusInterpreter}. */
@@ -165,27 +261,33 @@ public class AccessibilityFocusInterpreter
   /** Called by EventFilter. */
   @Override
   public @Nullable AccessibilityFocusEventInterpretation interpret(AccessibilityEvent event) {
+    FocusActionInfo info = actorState.getFocusHistory().getFocusActionInfoFromEvent(event);
+    boolean forceMuteFeedback = info != null && info.forceMuteFeedback;
+
     // For user interface interaction (such as quick menu to handle slider/number-picker) and image
     // caption.
     if (event.getEventType() == TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
       AccessibilityNodeInfoCompat node = AccessibilityNodeInfoUtils.toCompat(event.getSource());
       // Skips caption if the view has already been labeled.
       boolean needsCaption =
-          ImageCaptioner.supportsImageCaption(context)
-              && ImageCaptionUtils.needImageCaption(context, node)
-              && actorState.getCustomLabel().getLabelIdForViewId(node) == Label.NO_ID;
+          !forceMuteFeedback
+              && ImageCaptioner.supportsImageCaption(context)
+              && ImageCaptioner.needAutomaticCaptioning(
+                  context, node, actorState.getGeminiState().hasAiCore())
+              && actorState.getLabelManagerState().getLabelIdForNode(node) == Label.NO_ID;
       pipelineInterpretations.input(
           Performance.getInstance().onEventReceived(event),
           event,
-          Interpretation.AccessibilityFocused.create(needsCaption),
+          Interpretation.AccessibilityFocused.create(info, needsCaption),
           node);
     }
-    FocusActionInfo info = actorState.getFocusHistory().getFocusActionInfoFromEvent(event);
+
     if (info == null) {
       return null;
     }
+
     AccessibilityFocusEventInterpretation interpretation =
-        new AccessibilityFocusEventInterpretation(event.getEventType());
+        new AccessibilityFocusEventInterpretation(Compositor.toCompositorEvent(event));
     interpretation.setForceFeedbackEvenIfAudioPlaybackActive(
         info.forceFeedbackEvenIfAudioPlaybackActive());
     interpretation.setForceFeedbackEvenIfMicrophoneActive(
@@ -228,11 +330,21 @@ public class AccessibilityFocusInterpreter
   }
 
   /**
+   * Sets long press duration. It's only applicable when the typing method is not double-tap.
+   *
+   * @param duration in milliseconds
+   */
+  public void setTypingLongPressDurationMs(int duration) {
+    focusProcessorForTapAndTouchExploration.setTypingLongPressDurationMs(duration);
+  }
+
+  /**
    * Gets whether single-tap activation is enabled.
    *
    * @return Whether single-tap activation is enabled.
    */
-  public @TypingMethod int getTypingMethod() {
+  @TypingMethod
+  public int getTypingMethod() {
     return focusProcessorForTapAndTouchExploration.getTypingMethod();
   }
 }

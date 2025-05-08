@@ -18,13 +18,26 @@ package com.android.talkback;
 
 import android.content.Intent;
 import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.fragment.app.FragmentOnAttachListener;
+import android.text.TextUtils;
+import android.view.KeyEvent;
+import android.view.View;
+import androidx.annotation.VisibleForTesting;
+import androidx.lifecycle.ViewModel;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import com.google.android.accessibility.talkback.HatsSurveyRequester;
-import com.google.android.accessibility.talkback.preference.base.TalkBackKeyboardShortcutPreferenceFragment;
 import com.google.android.accessibility.talkback.preference.base.TalkBackPreferenceFragment;
-import com.google.android.accessibility.talkback.preference.base.VerbosityPrefFragment;
-import com.google.android.accessibility.utils.FeatureSupport;
-import com.google.android.accessibility.utils.PreferencesActivity;
+import com.google.android.accessibility.talkback.preference.base.TalkbackBaseFragment;
+import com.google.android.accessibility.talkback.preference.search.TalkBackSearchIndexablesProvider;
+import com.google.android.accessibility.utils.FormFactorUtils;
+import com.google.android.accessibility.utils.PackageManagerUtils;
+import com.google.android.accessibility.utils.preference.PreferencesActivity;
+import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import java.util.Locale;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -35,66 +48,172 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * installed talkback onto a clean device with older bundled talkback.
  * REFERTO
  */
-public class TalkBackPreferencesActivity extends PreferencesActivity {
+public class TalkBackPreferencesActivity extends PreferencesActivity
+    implements PreferenceFragmentCompat.OnPreferenceStartFragmentCallback,
+        FragmentOnAttachListener {
 
   private static final String TAG = "PreferencesActivity";
 
+  private HatsSurveyRequester hatsSurveyRequester;
+
+  private void assignSearchFragment(Intent intent) {
+    if (TalkBackSearchIndexablesProvider.isFromSearchIndexablesContract(intent)) {
+      TalkBackSearchIndexablesProvider.assignToFragmentFromSearch(intent);
+    }
+  }
+
   @Override
   protected void onCreate(@Nullable Bundle savedInstanceState) {
+    // Must be called before super.onCreate
+    assignSearchFragment(getIntent());
+
+    getSupportFragmentManager().addFragmentOnAttachListener(this);
     super.onCreate(savedInstanceState);
+
+    // Check RTL.
+    boolean isLocaleRTL =
+        TextUtils.getLayoutDirectionFromLocale(Locale.getDefault()) == View.LAYOUT_DIRECTION_RTL;
+    boolean isRTL =
+        getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+
+    if (isLocaleRTL && !isRTL) {
+      getWindow().getDecorView().setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+    }
+
     // Request the HaTS.
     if (supportHatsSurvey()) {
-      new HatsSurveyRequester(this).requestSurvey();
+      hatsSurveyRequester = new HatsSurveyRequester(this);
+      hatsSurveyRequester.requestSurvey();
+
+      HatsRequesterViewModel viewModel =
+          new ViewModelProvider(this).get(HatsRequesterViewModel.class);
+      viewModel.setHatsSurveyRequester(hatsSurveyRequester);
     }
+  }
+
+  @Override
+  protected void onDestroy() {
+    super.onDestroy();
+    getSupportFragmentManager().removeFragmentOnAttachListener(this);
+  }
+
+  @Override
+  public boolean onPreferenceStartFragment(PreferenceFragmentCompat caller, Preference pref) {
+    // Fall back to the default implementation in PreferenceFragmentCompat for other form factors.
+    if (!FormFactorUtils.getInstance().isAndroidWear()) {
+      return false;
+    }
+
+    if (pref.getFragment() == null) {
+      return false;
+    }
+    final Fragment fragment =
+        getSupportFragmentManager()
+            .getFragmentFactory()
+            .instantiate(getClassLoader(), pref.getFragment());
+
+    // WearPreferenceFragment couldn't be restored correctly, so we start a new Activity to
+    // prevent the failure of UI restoration.
+    if (fragment instanceof TalkbackBaseFragment) {
+      Intent intent = new Intent(this, TalkBackSubSettings.class);
+      intent.putExtra(FRAGMENT_NAME, pref.getFragment());
+      intent.putExtra(FRAGMENT_ARGS, pref.getExtras());
+      startActivity(intent);
+      return true;
+    }
+    return false;
+  }
+
+  @Override
+  public boolean dispatchKeyEvent(KeyEvent keyEvent) {
+    if ((keyEvent.getKeyCode() == KeyEvent.KEYCODE_BACK)
+        && (keyEvent.getAction() == KeyEvent.ACTION_UP)
+        && (hatsSurveyRequester != null)
+        && (hatsSurveyRequester.handleBackKeyPress())) {
+      return false;
+    }
+    return super.dispatchKeyEvent(keyEvent);
   }
 
   @Override
   protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
+    assignSearchFragment(getIntent());
 
     String fragmentName = intent.getStringExtra(FRAGMENT_NAME);
     PreferenceFragmentCompat fragment = getFragmentByName(fragmentName);
-
-    if (fragment != null) {
-      getSupportFragmentManager()
-          .beginTransaction()
-          .replace(getContainerId(), fragment, getFragmentTag())
-          // Add root page to back-history
-          .addToBackStack(/* name= */ null)
-          .commit();
-    }
+    fragment.setArguments(intent.getBundleExtra(FRAGMENT_ARGS));
+    LogUtils.e(TAG, "onNewIntent/getContainerId()= %s", getContainerId());
+    getSupportFragmentManager()
+        .beginTransaction()
+        .replace(getContainerId(), fragment, getFragmentTag())
+        // Add root page to back-history
+        .addToBackStack(/* name= */ null)
+        .commit();
   }
 
   @Override
   protected PreferenceFragmentCompat createPreferenceFragment() {
     Intent intent = getIntent();
-    PreferenceFragmentCompat fragment = null;
+    String fragmentName = null;
     if (intent != null) {
-      String fragmentName = intent.getStringExtra(FRAGMENT_NAME);
-
-      fragment = getFragmentByName(fragmentName);
+      fragmentName = intent.getStringExtra(FRAGMENT_NAME);
     }
-
-    return (fragment == null) ? new TalkBackPreferenceFragment() : fragment;
+    return getFragmentByName(fragmentName);
   }
 
-  private static PreferenceFragmentCompat getFragmentByName(String fragmentName) {
-    if (fragmentName == null) {
-      return null;
+  @Override
+  public void onAttachFragment(FragmentManager fragmentManager, Fragment fragment) {
+    if ((fragment instanceof TalkbackBaseFragment)
+        && (!(fragment instanceof TalkBackPreferenceFragment))) {
+      dismissHatsSurvey();
+    }
+  }
+
+  private static @Nullable PreferenceFragmentCompat getFragmentByName(String fragmentName) {
+    if (TextUtils.isEmpty(fragmentName)) {
+      return new TalkBackPreferenceFragment();
     }
 
-    if (fragmentName.equals(TalkBackKeyboardShortcutPreferenceFragment.getFragmentName())) {
-      return new TalkBackKeyboardShortcutPreferenceFragment();
-    } else if (fragmentName.equals(VerbosityPrefFragment.getFragmentName())) {
-      return new VerbosityPrefFragment();
+    try {
+      return (PreferenceFragmentCompat) Class.forName(fragmentName).newInstance();
+    } catch (ClassNotFoundException | InstantiationException | IllegalAccessException ex) {
+      LogUtils.d(TAG, "Failed to load class: %s", fragmentName);
+      return null;
     }
-    return null;
   }
 
   @Override
   protected boolean supportHatsSurvey() {
-    // HaTS requests Theme.AppCompat to display the survey, so disable it if the setting activity is
-    // using the material next theme.
-    return !FeatureSupport.supportSettingsTheme();
+    // Platform should support Hats if GMS core is available.
+    return PackageManagerUtils.hasGmsCorePackage(this);
   }
+
+  /** Dismisses Hats survey. */
+  private void dismissHatsSurvey() {
+    if (hatsSurveyRequester != null) {
+      hatsSurveyRequester.dismissSurvey();
+      hatsSurveyRequester = null;
+    }
+  }
+
+  /**
+   * A {@link ViewModel} which encapsulates {@link HatsSurveyRequester} for use in TalkBack setting
+   * fragments.
+   */
+  public static class HatsRequesterViewModel extends ViewModel {
+    private HatsSurveyRequester hatsSurveyRequester;
+
+    public HatsSurveyRequester getHatsSurveyRequester() {
+      return hatsSurveyRequester;
+    }
+
+    public void setHatsSurveyRequester(HatsSurveyRequester hatsSurveyRequester) {
+      this.hatsSurveyRequester = hatsSurveyRequester;
+    }
+  }
+
+  /** Activity to launch TalkBack settings fragment. It is used only for wear. */
+  @VisibleForTesting
+  public static class TalkBackSubSettings extends TalkBackPreferencesActivity {}
 }

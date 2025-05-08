@@ -7,19 +7,6 @@
     placeholders, and they get replaced by the build system with the appropriate
     value when a build executes. -->
 
-    <!-- The <queries> element allows us to ask the package manager about
-    the installation status of external components we are interested in. This
-    policy change was introduced in Android 11. -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE" />
-        </intent>
-        <intent>
-            <action
-                android:name="android.speech.RecognitionService" />
-        </intent>
-    </queries>
-
     <!-- Used by voice commands. -->
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
@@ -60,6 +47,12 @@
     <!-- Used to control Primes collection using Gservices flags -->
     <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
 
+    <!-- Required for posting notifications, beginning in Android T. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Required for binding AICore service for on-device AI features. -->
+    <uses-permission android:name="com.google.android.apps.aicore.service.BIND_SERVICE"/>
+
     <!-- Hardware compatibility. -->
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -70,16 +63,6 @@
 
     <application
         android:supportsRtl="true">
-
-        <receiver android:name="com.google.android.accessibility.talkback.BootReceiver"
-            android:directBootAware="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </receiver>
 
         <!-- TalkBack -->
         <service
@@ -113,7 +96,7 @@
         <!-- TalkBack Preferences -->
         <activity
             android:name="com.android.talkback.TalkBackPreferencesActivity"
-            android:configChanges="orientation|screenSize"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="true"
             android:label="@string/talkback_preferences_title"
             android:launchMode="singleTop"
@@ -121,27 +104,18 @@
             android:theme="@style/TalkBackSettings"
             tools:ignore="ExportedActivity" >
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.accessibilityservice.SERVICE_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
-        <!-- TalkBack Gesture Shortcut Preferences -->
+        <!-- TalkBack subsettings Preferences -->
         <activity
-            android:name="com.google.android.accessibility.talkback.preference.TalkBackShortcutPreferencesActivity"
-            android:exported="true"
-            android:label="@string/title_pref_category_manage_gestures"
-            android:launchMode="singleTop"
-            android:taskAffinity="com.google.android.accessibility.talkback.SettingsAffinity"
-            android:theme="@style/TalkBackSettings"
-            android:configChanges="orientation|screenSize"
-            tools:ignore="ExportedActivity" >
-            <!-- This preference activity can receive an implicit intent action -->
-            <intent-filter>
-                <action android:name=".TalkBackShortcutPreferencesActivity" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            android:name="com.android.talkback.TalkBackPreferencesActivity$TalkBackSubSettings"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
+            android:exported="false"
+            android:label="@string/talkback_preferences_title"
+            android:theme="@style/TalkBackSettings">
         </activity>
 
         <!-- TalkBack permission request activity proxy -->
@@ -154,30 +128,31 @@
             android:noHistory="false" >
         </activity>
 
-        <!-- TalkBack tutorial and help preferences -->
-        <activity
-            android:name="com.google.android.accessibility.talkback.preference.TalkBackHelpPreferencesActivity"
-            android:configChanges="orientation|screenSize"
-            android:exported="false"
-            android:label="@string/title_pref_category_tutorial_and_help"
-            android:launchMode="singleTop"
-            android:taskAffinity="com.google.android.accessibility.talkback.SettingsAffinity"
-            android:theme="@style/TalkBackSettings">
-            <!-- This preference activity can receive an implicit intent action -->
-            <intent-filter>
-                <action android:name=".preference.TalkBackHelpPreferencesActivity" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-
         <!-- TalkBack training -->
         <!-- To prevent slowdown of talkback event-handlers, arrange to run on a separate process. -->
         <activity
-            android:name="com.google.android.accessibility.talkback.training.TrainingActivity"
+            android:name="com.google.android.accessibility.talkback.trainingcommon.TrainingActivity"
             android:process=":Tutorial"
-            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="true"
             android:launchMode="singleTop"
+            android:theme="@style/TrainingActivityTheme"
+            android:windowSoftInputMode="adjustResize"
+            tools:ignore="ExportedActivity"
+            android:directBootAware="true">
+            <intent-filter>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <action android:name="com.google.android.accessibility.talkback.training.START" />
+            </intent-filter>
+        </activity>
+
+        <!-- Absolutely same with TrainingActivity for onboarding link to tutorial without breaking the singleTop launch mode.
+             To prevent slowdown of talkback event-handlers, arrange to run on a separate process. -->
+        <activity
+            android:name="com.google.android.accessibility.talkback.trainingcommon.SecondaryTrainingActivity"
+            android:process=":Tutorial"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
+            android:exported="true"
             android:theme="@style/TrainingActivityTheme"
             android:windowSoftInputMode="adjustResize"
             tools:ignore="ExportedActivity"
@@ -234,6 +209,17 @@
             android:theme="@style/DialogStyle"
             android:directBootAware="true"
             tools:ignore="ExportedActivity" >
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.google.android.accessibility.talkback.keyboard.TalkBackKeymapChangesActivity"
+            android:exported="true"
+            android:label="@string/keycombo_keymap_changes_instruction_title"
+            android:launchMode="singleTop"
+            android:theme="@style/TalkBackSettings">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>

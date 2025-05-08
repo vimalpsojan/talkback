@@ -17,49 +17,50 @@
 package com.google.android.accessibility.talkback;
 
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_SHOW_ON_SCREEN;
-import static com.google.android.accessibility.talkback.ScrollEventInterpreter.ACTION_AUTO_SCROLL;
 import static com.google.android.accessibility.talkback.focusmanagement.NavigationTarget.TARGET_DEFAULT;
 import static com.google.android.accessibility.utils.AccessibilityNodeInfoUtils.toStringShort;
-import static com.google.android.accessibility.utils.input.InputModeManager.INPUT_MODE_UNKNOWN;
+import static com.google.android.accessibility.utils.monitor.InputModeTracker.INPUT_MODE_UNKNOWN;
+import static com.google.android.accessibility.utils.output.FeedbackController.NO_SEPARATION;
 import static com.google.android.accessibility.utils.traversal.TraversalStrategy.SEARCH_FOCUS_BACKWARD;
 import static com.google.android.accessibility.utils.traversal.TraversalStrategy.SEARCH_FOCUS_FORWARD;
 import static com.google.android.accessibility.utils.traversal.TraversalStrategy.SEARCH_FOCUS_UNKNOWN;
 
 import android.accessibilityservice.AccessibilityGestureEvent;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.os.Bundle;
 import android.text.TextUtils;
-import androidx.annotation.NonNull;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.talkback.Feedback.AdjustVolume.StreamType;
 import com.google.android.accessibility.talkback.Feedback.Scroll.Action;
-import com.google.android.accessibility.talkback.ScrollEventInterpreter.ScrollTimeout;
-import com.google.android.accessibility.talkback.ScrollEventInterpreter.UserAction;
-import com.google.android.accessibility.talkback.actor.AutoScrollActor.AutoScrollRecord.Source;
 import com.google.android.accessibility.talkback.actor.TalkBackUIActor;
-import com.google.android.accessibility.talkback.eventprocessor.ProcessorCursorState;
 import com.google.android.accessibility.talkback.focusmanagement.NavigationTarget.TargetType;
 import com.google.android.accessibility.talkback.focusmanagement.action.NavigationAction;
 import com.google.android.accessibility.talkback.focusmanagement.interpreter.ScreenState;
 import com.google.android.accessibility.talkback.focusmanagement.record.FocusActionInfo;
 import com.google.android.accessibility.utils.AccessibilityNode;
 import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
+import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils.SpellingSuggestion;
 import com.google.android.accessibility.utils.FeatureSupport;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.StringBuilderUtils;
-import com.google.android.accessibility.utils.WebInterfaceUtils;
 import com.google.android.accessibility.utils.input.CursorGranularity;
-import com.google.android.accessibility.utils.input.InputModeManager.InputMode;
+import com.google.android.accessibility.utils.input.ScrollEventInterpreter.ScrollTimeout;
+import com.google.android.accessibility.utils.monitor.InputModeTracker.InputMode;
+import com.google.android.accessibility.utils.output.ScrollActionRecord;
+import com.google.android.accessibility.utils.output.ScrollActionRecord.UserAction;
 import com.google.android.accessibility.utils.output.SpeechController.SpeakOptions;
 import com.google.android.accessibility.utils.traversal.TraversalStrategy.SearchDirection;
+import com.google.android.accessibility.utils.traversal.TraversalStrategy.SearchDirectionOrUnknown;
 import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
 import java.util.Locale;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -76,8 +77,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 @AutoValue
 public abstract class Feedback {
 
-  // TODO: Add Actors that use all this feedback.
-
   //////////////////////////////////////////////////////////////////////////////////
   // Constants
 
@@ -90,10 +89,8 @@ public abstract class Feedback {
   public static final int DEFAULT = -1;
   public static final int HINT = 0;
   public static final int GESTURE_VIBRATION = 1;
-  /** Use for speech of cursor state at {@link ProcessorCursorState} */
-  public static final int CURSOR_STATE = 2;
 
-  /** Interrupt levels. Level -1 does not interrupt at all. */
+  /** Interrupt levels. Level 1 is default. Level -1 does not interrupt at all. */
   public @interface InterruptLevel {}
 
   //////////////////////////////////////////////////////////////////////////////////
@@ -118,7 +115,6 @@ public abstract class Feedback {
     return Part.builder().setInterruptGroup(group).setInterruptLevel(level);
   }
 
-  /** Copies node at {@link Label.Builder}, caller retains ownership. */
   public static Part.Builder label(@Nullable String text, AccessibilityNodeInfoCompat node) {
     return Part.builder()
         .setLabel(Label.builder().setAction(Label.Action.SET).setText(text).setNode(node).build());
@@ -157,10 +153,6 @@ public abstract class Feedback {
     return Part.builder().sound(resourceId);
   }
 
-  public static Part.Builder sound(int resourceId, float rate, float volume) {
-    return Part.builder().sound(resourceId, rate, volume);
-  }
-
   public static Part.Builder vibration(int resourceId) {
     return Part.builder().vibration(resourceId);
   }
@@ -178,9 +170,7 @@ public abstract class Feedback {
         .setLanguage(Language.create(Language.Action.SET_LANGUAGE, currentLanguage));
   }
 
-  /** Copies node at {@link EditText.Builder}, caller retains ownership. */
   public static EditText.Builder edit(AccessibilityNodeInfoCompat node, EditText.Action action) {
-    // TODO: Push all obtain() calls down to data-structure constructors/setters.
     return EditText.builder().setNode(node).setAction(action);
   }
 
@@ -204,11 +194,19 @@ public abstract class Feedback {
     return Part.builder().setAdjustValue(AdjustValue.create(action));
   }
 
+  /**
+   * Navigates the previous/next misspelled word if any.
+   *
+   * @param isNext specifies the direction (previous/next) of traversal.
+   */
+  public static Part.Builder navigateTypo(boolean isNext, boolean useInputFocusIfEmpty) {
+    return Part.builder().setNavigateTypo(NavigateTypo.create(isNext, useInputFocusIfEmpty));
+  }
+
   public static Part.Builder adjustVolume(AdjustVolume.Action action, StreamType streamType) {
     return Part.builder().setAdjustVolume(AdjustVolume.create(action, streamType));
   }
 
-  /** Copies target at {@link NodeAction.Builder}, caller retains ownership. */
   public static Part.Builder nodeAction(AccessibilityNode target, int actionId) {
     Part.Builder partBuilder = Part.builder();
     if (target == null) {
@@ -218,22 +216,18 @@ public abstract class Feedback {
         NodeAction.builder().setTarget(target).setActionId(actionId).build());
   }
 
-  /**
-   * Copies target at {@link #nodeAction(AccessibilityNodeInfoCompat, int, Bundle)}, caller retains
-   * ownership.
-   */
-  public static Part.Builder nodeAction(AccessibilityNodeInfoCompat target, int actionId) {
+  public static Part.Builder nodeAction(
+      @Nullable AccessibilityNodeInfoCompat target, int actionId) {
     return nodeAction(target, actionId, /* args= */ null);
   }
 
-  /** Copies target at {@link NodeAction.Builder}, caller retains ownership. */
   public static Part.Builder nodeAction(
-      AccessibilityNodeInfoCompat target, int actionId, @Nullable Bundle args) {
+      @Nullable AccessibilityNodeInfoCompat target, int actionId, @Nullable Bundle args) {
     Part.Builder partBuilder = Part.builder();
     if (target == null) {
       return partBuilder;
     }
-    AccessibilityNode accessibilityNode = AccessibilityNode.obtainCopy(target);
+    AccessibilityNode accessibilityNode = AccessibilityNode.takeOwnership(target);
     return partBuilder.setNodeAction(
         NodeAction.builder()
             .setTarget(accessibilityNode)
@@ -242,7 +236,6 @@ public abstract class Feedback {
             .build());
   }
 
-  /** Copies target at {@link WebAction.Builder}, caller retains ownership. */
   public static Part.Builder navigateWebByAction(
       AccessibilityNodeInfoCompat target,
       int action,
@@ -253,28 +246,6 @@ public abstract class Feedback {
     return webAction(target, action, args, updateFocusHistory);
   }
 
-  /**
-   * Copies target at {@link WebAction.Builder}, caller retains ownership.
-   *
-   * <p>Navigates Exit Special Web Content when enabled is false. Or Enter Special Web Content when
-   * enabled is true. This has same function with {@code
-   * WebInterfaceUtils.setSpecialContentModeEnabled}
-   */
-  public static Part.Builder navigateSpecialWeb(
-      AccessibilityNodeInfoCompat target, boolean enabled, boolean updateFocusHistory) {
-    int action =
-        (enabled)
-            ? AccessibilityNodeInfoCompat.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
-            : AccessibilityNodeInfoCompat.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY;
-    Bundle args = new Bundle();
-
-    args.putInt(
-        AccessibilityNodeInfoCompat.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT,
-        WebInterfaceUtils.ACTION_TOGGLE_SPECIAL_CONTENT);
-    return webAction(target, action, args, updateFocusHistory);
-  }
-
-  /** Copies target at {@link WebAction.Builder}, caller retains ownership. */
   public static Part.Builder webAction(
       AccessibilityNodeInfoCompat node,
       int action,
@@ -294,7 +265,6 @@ public abstract class Feedback {
             .build());
   }
 
-  /** Copies start at {@link WebAction.Builder}, caller retains ownership. */
   public static Part.Builder webDirectionHtml(
       AccessibilityNodeInfoCompat target, NavigationAction action) {
 
@@ -307,9 +277,8 @@ public abstract class Feedback {
                 .build());
   }
 
-  /** Copies node at {@link Scroll.Builder}, caller retains ownership. */
   public static Part.Builder scroll(
-      AccessibilityNode node, @UserAction int userAction, int nodeAction, @Nullable Source source) {
+      AccessibilityNode node, @UserAction int userAction, int nodeAction, @Nullable String source) {
     return Part.builder()
         .setScroll(
             Scroll.builder()
@@ -321,13 +290,13 @@ public abstract class Feedback {
                 .build());
   }
 
-  /** Copies nodeCompat at {@link Scroll.Builder}, caller retains ownership. */
   public static Part.Builder scroll(
       AccessibilityNodeInfoCompat nodeCompat,
       @UserAction int userAction,
       int nodeAction,
-      @Nullable Source source,
-      ScrollTimeout scrollTimeout) {
+      @Nullable String source,
+      ScrollTimeout scrollTimeout,
+      int autoScrollAttempt) {
     return Part.builder()
         .setScroll(
             Scroll.builder()
@@ -337,6 +306,7 @@ public abstract class Feedback {
                 .setNodeAction(nodeAction)
                 .setSource(source)
                 .setTimeout(scrollTimeout)
+                .setAutoScrollAttempt(autoScrollAttempt)
                 .build());
   }
 
@@ -345,7 +315,7 @@ public abstract class Feedback {
         .setScroll(
             Scroll.builder()
                 .setAction(Scroll.Action.CANCEL_TIMEOUT)
-                .setUserAction(ScrollEventInterpreter.ACTION_UNKNOWN)
+                .setUserAction(ScrollActionRecord.ACTION_UNKNOWN)
                 .setNodeAction(NODE_ACTION_UNKNOWN)
                 .build());
   }
@@ -358,13 +328,12 @@ public abstract class Feedback {
                 .setAction(Action.ENSURE_ON_SCREEN)
                 .setNodeCompat(scrollableNode)
                 .setNodeToMoveOnScreen(targetNode)
-                .setUserAction(ACTION_AUTO_SCROLL)
+                .setUserAction(ScrollActionRecord.ACTION_AUTO_SCROLL)
                 .setNodeAction(ACTION_SHOW_ON_SCREEN.getId())
-                .setSource(Source.FOCUS)
+                .setSource(ScrollActionRecord.FOCUS)
                 .build());
   }
 
-  /** Copies target at {@link Focus.Builder}, caller retains ownership. */
   public static Focus.Builder focus(
       AccessibilityNodeInfoCompat target, FocusActionInfo focusActionInfo) {
     return Focus.builder()
@@ -385,6 +354,18 @@ public abstract class Feedback {
     return Focus.builder().setAction(Focus.Action.SEARCH_AGAIN);
   }
 
+  /**
+   * Builder for setting a target that should be focused when a user performs next window navigation
+   */
+  public static Focus.Builder stealNextWindowNavigation(
+      @Nullable AccessibilityNodeInfoCompat stealNextWindowTarget,
+      @SearchDirectionOrUnknown int direction) {
+    return Focus.builder()
+        .setAction(Focus.Action.STEAL_NEXT_WINDOW_NAVIGATION)
+        .setStealNextWindowTarget(stealNextWindowTarget)
+        .setStealNextWindowTargetDirection(direction);
+  }
+
   public static Part.Builder focusDirection(FocusDirection.Action action) {
     return Part.builder().setFocusDirection(FocusDirection.builder().setAction(action).build());
   }
@@ -395,7 +376,6 @@ public abstract class Feedback {
         .setDirection(direction);
   }
 
-  /** Copies node at {@link FocusDirection.Builder}, caller retains ownership. */
   public static FocusDirection.Builder directionNavigationFollowTo(
       @Nullable AccessibilityNodeInfoCompat node, @SearchDirection int direction) {
     return FocusDirection.builder()
@@ -413,6 +393,22 @@ public abstract class Feedback {
     return FocusDirection.builder()
         .setAction(FocusDirection.Action.NEXT)
         .setGranularity(granularity)
+        .setInputMode(inputMode);
+  }
+
+  public static FocusDirection.Builder nextContainer(@InputMode int inputMode) {
+    return FocusDirection.builder()
+        .setAction(FocusDirection.Action.NAVIGATE)
+        .setDirection(SEARCH_FOCUS_FORWARD)
+        .setToContainer(true)
+        .setInputMode(inputMode);
+  }
+
+  public static FocusDirection.Builder prevContainer(@InputMode int inputMode) {
+    return FocusDirection.builder()
+        .setAction(FocusDirection.Action.NAVIGATE)
+        .setDirection(SEARCH_FOCUS_BACKWARD)
+        .setToContainer(true)
         .setInputMode(inputMode);
   }
 
@@ -456,7 +452,6 @@ public abstract class Feedback {
         .setGranularity(granularity);
   }
 
-  /** Copies node {@link FocusDirection.Builder}, caller retains ownership. */
   public static Part.Builder selectionModeOn(AccessibilityNodeInfoCompat node) {
     return Part.builder()
         .setFocusDirection(
@@ -466,6 +461,7 @@ public abstract class Feedback {
                 .build());
   }
 
+  /** Turn off the selection mode. */
   public static Part.Builder selectionModeOff() {
     return Part.builder()
         .setFocusDirection(
@@ -473,7 +469,13 @@ public abstract class Feedback {
   }
 
   public static Part.Builder talkBackUI(TalkBackUI.Action action, TalkBackUIActor.Type type) {
-    return Part.builder().setTalkBackUI(TalkBackUI.create(action, type));
+    return Part.builder()
+        .setTalkBackUI(TalkBackUI.create(action, type, /* message= */ null, /* showIcon= */ true));
+  }
+
+  public static Part.Builder talkBackUI(
+      TalkBackUI.Action action, TalkBackUIActor.Type type, CharSequence message, boolean showIcon) {
+    return Part.builder().setTalkBackUI(TalkBackUI.create(action, type, message, showIcon));
   }
 
   public static Part.Builder showToast(
@@ -500,12 +502,10 @@ public abstract class Feedback {
     return Part.builder().setDeviceInfo(DeviceInfo.create(action, configuration));
   }
 
-  /** Copies node at {@link ImageCaption.Builder}, caller retains ownership. */
   public static Part.Builder performImageCaptions(AccessibilityNodeInfoCompat node) {
     return performImageCaptions(node, /* isUserRequested= */ false);
   }
 
-  /** Copies node at {@link ImageCaption.Builder}, caller retains ownership. */
   public static Part.Builder performImageCaptions(
       AccessibilityNodeInfoCompat node, boolean isUserRequested) {
     return Part.builder()
@@ -517,6 +517,89 @@ public abstract class Feedback {
                 .build());
   }
 
+  public static Part.Builder performDetailedImageCaption(AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.PERFORM_CAPTION_WITH_GEMINI)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder performDetailedOnDeviceImageCaption(AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.PERFORM_CAPTION_WITH_ON_DEVICE_GEMINI)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder responseImageCaptionResult(
+      int requestId, String text, boolean isSuccess, boolean manualTrigger) {
+    return Part.builder()
+        .setImageCaptionResult(
+            ImageCaptionResult.builder()
+                .setRequestId(requestId)
+                .setText(text)
+                .setIsSuccess(isSuccess)
+                .setUserRequested(manualTrigger)
+                .build());
+  }
+
+  public static Part.Builder performGeminiOptIn(AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.DETAILED_DESCRIPTION_OPT_IN)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder performOnDeviceGeminiOptIn(AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.ON_DEVICE_DETAILED_DESCRIPTION_OPT_IN)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder performPopDetailedImageDescriptionSettings(
+      AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.CONFIG_DETAILED_IMAGE_DESCRIPTIONS_SETTINGS)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder confirmDownloadAndPerformCaptions(AccessibilityNodeInfoCompat node) {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.CONFIRM_DOWNLOAD_AND_PERFORM_CAPTIONS)
+                .setTarget(node)
+                .build());
+  }
+
+  public static Part.Builder initializeIconDetection() {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.INITIALIZE_ICON_DETECTION)
+                .build());
+  }
+
+  public static Part.Builder initializeImageDescription() {
+    return Part.builder()
+        .setImageCaption(
+            ImageCaption.builder()
+                .setAction(ImageCaption.Action.INITIALIZE_IMAGE_DESCRIPTION)
+                .build());
+  }
+
   public static Part.Builder wholeScreenChange() {
     return Part.builder()
         .setUiChange(
@@ -525,6 +608,50 @@ public abstract class Feedback {
 
   public static Part.Builder partialUiChange(UiChange.Action action, Rect sourceBoundsInScreen) {
     return Part.builder().setUiChange(UiChange.create(action, sourceBoundsInScreen));
+  }
+
+  public static Part.Builder universalSearch(UniversalSearch.Action action) {
+    return Part.builder().setUniversalSearch(UniversalSearch.builder().setAction(action).build());
+  }
+
+  public static Part.Builder renewOverlay(Configuration config) {
+    return Part.builder()
+        .setUniversalSearch(
+            UniversalSearch.builder()
+                .setAction(UniversalSearch.Action.RENEW_OVERLAY)
+                .setConfig(config)
+                .build());
+  }
+
+  public static Part.Builder geminiRequest(int requestId, String text, Bitmap image) {
+    return Part.builder()
+        .setGeminiRequest(
+            GeminiRequest.builder()
+                .setAction(GeminiRequest.Action.REQUEST)
+                .setRequestId(requestId)
+                .setText(text)
+                .setImage(image)
+                .build());
+  }
+
+  public static Part.Builder geminiOnDeviceImageCaptioning(
+      int requestId, Bitmap image, boolean manualTrigger) {
+    return Part.builder()
+        .setGeminiRequest(
+            GeminiRequest.builder()
+                .setManualTrigger(manualTrigger)
+                .setAction(GeminiRequest.Action.REQUEST_ON_DEVICE_IMAGE_CAPTIONING)
+                .setRequestId(requestId)
+                .setImage(image)
+                .build());
+  }
+
+  public static Part.Builder requestServiceFlag(ServiceFlag.Action action, int flag) {
+    return Part.builder().setServiceFlag(ServiceFlag.create(action, flag));
+  }
+
+  public static Part.Builder performBrailleDisplayAction(BrailleDisplay.Action action) {
+    return Part.builder().setBrailleDisplay(BrailleDisplay.create(action));
   }
 
   //////////////////////////////////////////////////////////////////////////////////
@@ -600,6 +727,8 @@ public abstract class Feedback {
 
     public abstract @Nullable AdjustValue adjustValue();
 
+    public abstract @Nullable NavigateTypo navigateTypo();
+
     public abstract @Nullable AdjustVolume adjustVolume();
 
     public abstract @Nullable TalkBackUI talkBackUI();
@@ -610,9 +739,19 @@ public abstract class Feedback {
 
     public abstract @Nullable ImageCaption imageCaption();
 
+    public abstract @Nullable ImageCaptionResult imageCaptionResult();
+
     public abstract @Nullable DeviceInfo deviceInfo();
 
     public abstract @Nullable UiChange uiChange();
+
+    public abstract @Nullable UniversalSearch universalSearch();
+
+    public abstract @Nullable GeminiRequest geminiRequest();
+
+    public abstract @Nullable ServiceFlag serviceFlag();
+
+    public abstract @Nullable BrailleDisplay brailleDisplay();
 
     public static Builder builder() {
       return new AutoValue_Feedback_Part.Builder()
@@ -639,10 +778,6 @@ public abstract class Feedback {
 
       public Builder sound(int resourceId) {
         return setSound(Sound.create(resourceId));
-      }
-
-      public Builder sound(int resourceId, float rate, float volume) {
-        return setSound(Sound.create(resourceId, rate, volume));
       }
 
       public Builder vibration(int resourceId) {
@@ -688,20 +823,16 @@ public abstract class Feedback {
 
       public abstract Builder setLanguage(Language language);
 
-      /** Takes ownership of edit. */
       public abstract Builder setEdit(EditText edit);
 
       public abstract Builder setSystemAction(SystemAction systemAction);
 
-      /** Takes ownership of nodeAction. */
       public abstract Builder setNodeAction(NodeAction nodeAction);
 
-      /** Takes ownership of nodeAction. */
       public abstract Builder setWebAction(WebAction webAction);
 
       public abstract Builder setScroll(Scroll scroll);
 
-      /** Takes ownership of focus. */
       public abstract Builder setFocus(Focus focus);
 
       public abstract Builder setFocusDirection(FocusDirection focusDirection);
@@ -711,6 +842,8 @@ public abstract class Feedback {
       public abstract Builder setSpeechRate(SpeechRate speechRate);
 
       public abstract Builder setAdjustValue(AdjustValue adjustValue);
+
+      public abstract Builder setNavigateTypo(NavigateTypo navigateTypo);
 
       public abstract Builder setAdjustVolume(AdjustVolume adjustVolume);
 
@@ -722,9 +855,19 @@ public abstract class Feedback {
 
       public abstract Builder setImageCaption(ImageCaption imageCaption);
 
+      public abstract Builder setImageCaptionResult(ImageCaptionResult imageCaptionResult);
+
       public abstract Builder setDeviceInfo(DeviceInfo deviceInfo);
 
       public abstract Builder setUiChange(UiChange uiChange);
+
+      public abstract Builder setUniversalSearch(UniversalSearch universalSearch);
+
+      public abstract Builder setGeminiRequest(GeminiRequest geminiRequest);
+
+      public abstract Builder setServiceFlag(ServiceFlag serviceFlag);
+
+      public abstract Builder setBrailleDisplay(BrailleDisplay brailleDisplay);
 
       public abstract Part build();
     }
@@ -740,6 +883,7 @@ public abstract class Feedback {
               StringBuilderUtils.optionalTag(
                   "interruptSoundAndVibration", interruptSoundAndVibration()),
               StringBuilderUtils.optionalTag("interruptAllFeedback", interruptAllFeedback()),
+              StringBuilderUtils.optionalTag("interruptGentle", interruptGentle()),
               StringBuilderUtils.optionalTag("stopTts", stopTts()),
               StringBuilderUtils.optionalSubObj("label", label()),
               StringBuilderUtils.optionalSubObj("dimScreen", dimScreen()),
@@ -762,11 +906,17 @@ public abstract class Feedback {
               StringBuilderUtils.optionalSubObj("showToast", showToast()),
               StringBuilderUtils.optionalSubObj("gesture", gesture()),
               StringBuilderUtils.optionalSubObj("imageCaption", imageCaption()),
+              StringBuilderUtils.optionalSubObj("imageCaptionResult", imageCaptionResult()),
               StringBuilderUtils.optionalSubObj("deviceInfo", deviceInfo()),
               StringBuilderUtils.optionalSubObj("uiChange", uiChange()),
               StringBuilderUtils.optionalSubObj("speechRate", speechRate()),
               StringBuilderUtils.optionalSubObj("adjustValue", adjustValue()),
-              StringBuilderUtils.optionalSubObj("adjustVolume", adjustVolume()));
+              StringBuilderUtils.optionalSubObj("navigateTypo", navigateTypo()),
+              StringBuilderUtils.optionalSubObj("adjustVolume", adjustVolume()),
+              StringBuilderUtils.optionalSubObj("universalSearch", universalSearch()),
+              StringBuilderUtils.optionalSubObj("geminiRequest", geminiRequest()),
+              StringBuilderUtils.optionalSubObj("serviceFlag", serviceFlag()),
+              StringBuilderUtils.optionalSubObj("brailleDisplay", brailleDisplay()));
     }
   }
 
@@ -802,14 +952,7 @@ public abstract class Feedback {
 
       public abstract Builder setNode(AccessibilityNodeInfoCompat node);
 
-      abstract AccessibilityNodeInfoCompat node();
-
-      abstract Label autoBuild();
-
-      public Label build() {
-        setNode(AccessibilityNodeInfoUtils.obtain(node()));
-        return autoBuild();
-      }
+      public abstract Label build();
     }
   }
 
@@ -845,11 +988,12 @@ public abstract class Feedback {
       PAUSE_OR_RESUME,
       TOGGLE_VOICE_FEEDBACK,
       /**
-       * The SILENCE and UNSILENCE actions should be used with caution, the caller should maintein
+       * The SILENCE and UNSILENCE actions should be used with caution, the caller should maintain
        * the lifecycle of the silence state, it currently only used by voice command.
        */
       SILENCE,
       UNSILENCE,
+      INVALIDATE_FREQUENT_CONTENT_CHANGE_CACHE,
     }
 
     public static Speech create(CharSequence text, @Nullable SpeakOptions options) {
@@ -874,8 +1018,17 @@ public abstract class Feedback {
 
     public abstract @Nullable SpeakOptions hintSpeakOptions();
 
+    @InterruptGroup
+    public abstract int hintInterruptGroup();
+
+    @InterruptLevel
+    public abstract int hintInterruptLevel();
+
     public static Builder builder() {
-      return new AutoValue_Feedback_Speech.Builder();
+      // Set default hint-priority & group.
+      return new AutoValue_Feedback_Speech.Builder()
+          .setHintInterruptGroup(HINT)
+          .setHintInterruptLevel(1);
     }
 
     /** Builder for Speech feedback data */
@@ -891,6 +1044,10 @@ public abstract class Feedback {
       public abstract Builder setHint(@Nullable CharSequence hint);
 
       public abstract Builder setHintSpeakOptions(@Nullable SpeakOptions hintSpeakOptions);
+
+      public abstract Builder setHintInterruptGroup(@InterruptGroup int hintInterruptGroup);
+
+      public abstract Builder setHintInterruptLevel(@InterruptLevel int hintInterruptLevel);
 
       public abstract Speech build();
     }
@@ -940,9 +1097,10 @@ public abstract class Feedback {
     /** Types of exclusive continuous-reading actions. */
     public enum Action {
       START_AT_TOP,
-      START_AT_NEXT,
+      START_AT_CURSOR,
       READ_FOCUSED_CONTENT,
       INTERRUPT,
+      IGNORE,
     }
 
     public static ContinuousRead create(ContinuousRead.Action action) {
@@ -957,13 +1115,15 @@ public abstract class Feedback {
   public abstract static class Sound {
 
     public static Sound create(int resourceId) {
-      float rate = 1.0f;
-      float volume = 1.0f;
-      return create(resourceId, rate, volume);
+      return create(resourceId, /* rate= */ 1.0f, /* volume= */ 1.0f, NO_SEPARATION);
     }
 
     public static Sound create(int resourceId, float rate, float volume) {
-      return new AutoValue_Feedback_Sound(resourceId, rate, volume);
+      return new AutoValue_Feedback_Sound(resourceId, rate, volume, NO_SEPARATION);
+    }
+
+    public static Sound create(int resourceId, float rate, float volume, long separationMillisec) {
+      return new AutoValue_Feedback_Sound(resourceId, rate, volume, separationMillisec);
     }
 
     public abstract int resourceId();
@@ -971,6 +1131,8 @@ public abstract class Feedback {
     public abstract float rate();
 
     public abstract float volume();
+
+    public abstract long separationMillisec();
   }
 
   /** Inner data-structure for vibration feedback. */
@@ -992,6 +1154,8 @@ public abstract class Feedback {
       TRIGGER_TUTORIAL,
       TRIGGER_PRACTICE_GESTURE,
       TRIGGER_ASSISTANT,
+      TRIGGER_BRAILLE_DISPLAY_SETTINGS,
+      TRIGGER_IMAGE_DESCRIPTIONS_SETTINGS,
     }
 
     public static TriggerIntent create(TriggerIntent.Action action) {
@@ -1040,7 +1204,9 @@ public abstract class Feedback {
       DELETE,
       CURSOR_TO_BEGINNING, // Works with stopSelecting.
       CURSOR_TO_END, // Works with stopSelecting.
-      INSERT; // Requires text.
+      INSERT, // Requires text.
+      TYPO_CORRECTION, // Requires text and suggestion.
+      MOVE_CURSOR; // Requires cursor index.
     }
 
     public abstract AccessibilityNodeInfoCompat node();
@@ -1051,16 +1217,21 @@ public abstract class Feedback {
 
     public abstract @Nullable CharSequence text();
 
+    public abstract @Nullable SpellingSuggestion spellingSuggestion();
+
+    public abstract int cursorIndex();
+
     public static Builder builder() {
       return new AutoValue_Feedback_EditText.Builder()
           // Set default values that are not null.
-          .setStopSelecting(false);
+          .setStopSelecting(false)
+          .setCursorIndex(-1);
     }
 
     /** Builder for EditText feedback data */
     @AutoValue.Builder
     public abstract static class Builder {
-      /** Copies node at{@link EditText.Builder}, caller retains ownership. */
+
       public abstract Builder setNode(AccessibilityNodeInfoCompat node);
 
       public abstract Builder setAction(Action action);
@@ -1069,16 +1240,15 @@ public abstract class Feedback {
 
       public abstract Builder setText(@Nullable CharSequence text);
 
-      abstract AccessibilityNodeInfoCompat node();
+      public abstract Builder setSpellingSuggestion(
+          @Nullable SpellingSuggestion spellingSuggestion);
 
-      abstract EditText autoBuild();
+      public abstract Builder setCursorIndex(int cursorIndex);
 
-      public EditText build() {
-        setNode(AccessibilityNodeInfoUtils.obtain(node()));
-        return autoBuild();
-      }
+      public abstract EditText build();
     }
   }
+
   /** Inner data-structure for performing a global action. */
   @AutoValue
   public abstract static class SystemAction {
@@ -1093,7 +1263,6 @@ public abstract class Feedback {
   /** Inner data-structure for performing an action on a node. */
   @AutoValue
   public abstract static class NodeAction {
-    /** Owned node. */
     public abstract AccessibilityNode target();
 
     public abstract int actionId();
@@ -1108,24 +1277,13 @@ public abstract class Feedback {
     @AutoValue.Builder
     public abstract static class Builder {
 
-      /** Copies node at{@link NodeAction.Builder}, caller retains ownership. */
       public abstract Builder setTarget(AccessibilityNode target);
 
       public abstract Builder setActionId(int actionId);
 
       public abstract Builder setArgs(@Nullable Bundle args);
 
-      abstract AccessibilityNode target();
-
-      abstract NodeAction autoBuild();
-
-      public NodeAction build() {
-        AccessibilityNode accessibilityNode = target();
-        if (accessibilityNode != null) {
-          setTarget(accessibilityNode.obtainCopy());
-        }
-        return autoBuild();
-      }
+      public abstract NodeAction build();
     }
 
     @Override
@@ -1149,7 +1307,6 @@ public abstract class Feedback {
 
     public abstract WebAction.Action action();
 
-    /** Owned node. */
     public abstract AccessibilityNodeInfoCompat target();
 
     public abstract int nodeAction();
@@ -1171,7 +1328,6 @@ public abstract class Feedback {
     public abstract static class Builder {
       public abstract Builder setAction(WebAction.Action action);
 
-      /** Copies node at{@link WebAction.Builder}, caller retains ownership. */
       public abstract Builder setTarget(AccessibilityNodeInfoCompat target);
 
       public abstract Builder setNodeAction(int nodeAction);
@@ -1182,18 +1338,7 @@ public abstract class Feedback {
 
       public abstract Builder setNavigationAction(NavigationAction navigationAction);
 
-      abstract AccessibilityNodeInfoCompat target();
-
-      abstract WebAction autoBuild();
-
-      public WebAction build() {
-        /** Owned node. */
-        AccessibilityNodeInfoCompat node = target();
-        if (node != null) {
-          setTarget(AccessibilityNodeInfoCompat.obtain(node));
-        }
-        return autoBuild();
-      }
+      public abstract WebAction build();
     }
 
     @Override
@@ -1231,13 +1376,17 @@ public abstract class Feedback {
 
     public abstract int nodeAction();
 
-    public abstract @Nullable Source source();
+    public abstract @Nullable String source();
 
     public abstract ScrollTimeout timeout();
 
+    public abstract int autoScrollAttempt();
+
     public static Scroll.Builder builder() {
       // By default, use timeout short.
-      return new AutoValue_Feedback_Scroll.Builder().setTimeout(ScrollTimeout.SCROLL_TIMEOUT_SHORT);
+      return new AutoValue_Feedback_Scroll.Builder()
+          .setTimeout(ScrollTimeout.SCROLL_TIMEOUT_SHORT)
+          .setAutoScrollAttempt(0);
     }
 
     /** Builder for Scroll feedback data */
@@ -1246,11 +1395,9 @@ public abstract class Feedback {
 
       public abstract Scroll.Builder setNode(@Nullable AccessibilityNode node);
 
-      /** Copies node at{@link Scroll.Builder}, caller retains ownership. */
       public abstract Scroll.Builder setNodeCompat(
           @Nullable AccessibilityNodeInfoCompat nodeCompat);
 
-      /** Copies node at{@link Scroll.Builder}, caller retains ownership. */
       public abstract Scroll.Builder setNodeToMoveOnScreen(
           @Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen);
 
@@ -1258,30 +1405,13 @@ public abstract class Feedback {
 
       public abstract Scroll.Builder setNodeAction(int nodeAction);
 
-      public abstract Scroll.Builder setSource(@Nullable Source source);
+      public abstract Scroll.Builder setSource(@Nullable String source);
 
       public abstract Scroll.Builder setTimeout(ScrollTimeout timeout);
 
-      abstract @Nullable AccessibilityNode node();
+      public abstract Scroll.Builder setAutoScrollAttempt(int autoScrollAttempt);
 
-      abstract @Nullable AccessibilityNodeInfoCompat nodeCompat();
-
-      abstract @Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen();
-
-      abstract Scroll autoBuild();
-
-      public Scroll build() {
-        AccessibilityNode accessibilityNode = node();
-        if (accessibilityNode != null) {
-          setNode(accessibilityNode.obtainCopy());
-        }
-        setNodeCompat(AccessibilityNodeInfoUtils.obtain(nodeCompat()));
-        AccessibilityNodeInfoCompat nodeToMoveOnScreen = nodeToMoveOnScreen();
-        if (nodeToMoveOnScreen != null) {
-          setNodeToMoveOnScreen(AccessibilityNodeInfoUtils.obtain(nodeToMoveOnScreen));
-        }
-        return autoBuild();
-      }
+      public abstract Scroll build();
     }
   }
 
@@ -1299,7 +1429,7 @@ public abstract class Feedback {
       CACHE,
       MUTE_NEXT_FOCUS,
       RESTORE_ON_NEXT_WINDOW,
-      RESTORE,
+      RESTORE_TO_CACHE,
       CLEAR_CACHED,
       INITIAL_FOCUS_RESTORE,
       INITIAL_FOCUS_FOLLOW_INPUT,
@@ -1312,15 +1442,14 @@ public abstract class Feedback {
       CLICK_ANCESTOR,
       SEARCH_FROM_TOP, // Requires searchKeyword.
       SEARCH_AGAIN,
-      ENSURE_ACCESSIBILITY_FOCUS_ON_SCREEN;
+      ENSURE_ACCESSIBILITY_FOCUS_ON_SCREEN,
+      RENEW_ENSURE_FOCUS,
+      STEAL_NEXT_WINDOW_NAVIGATION;
     }
 
     public abstract @Nullable AccessibilityNodeInfoCompat start();
 
     public abstract @Nullable AccessibilityNodeInfoCompat target();
-
-    @SearchDirection
-    public abstract int direction();
 
     public abstract @Nullable FocusActionInfo focusActionInfo();
 
@@ -1332,31 +1461,25 @@ public abstract class Feedback {
 
     public abstract Focus.Action action();
 
-    public abstract @Nullable AccessibilityNodeInfoCompat scrolledNode();
-
     public abstract @Nullable ScreenState screenState();
 
-    public boolean hasDirection() {
-      return (direction() != SEARCH_FOCUS_UNKNOWN);
-    }
+    public abstract @Nullable AccessibilityNodeInfoCompat stealNextWindowTarget();
+
+    public abstract @SearchDirectionOrUnknown int stealNextWindowTargetDirection();
 
     public static Builder builder() {
       return new AutoValue_Feedback_Focus.Builder()
           // Set default values that are not null.
-          .setDirection(SEARCH_FOCUS_UNKNOWN)
-          .setForceRefocus(false);
+          .setForceRefocus(false)
+          .setStealNextWindowTargetDirection(SEARCH_FOCUS_UNKNOWN);
     }
 
     /** Builder for Focus feedback data */
     @AutoValue.Builder
     public abstract static class Builder {
-      /** Copies node at{@link Focus.Builder}, caller retains ownership. */
       public abstract Builder setStart(@Nullable AccessibilityNodeInfoCompat start);
 
-      /** Copies node at{@link Focus.Builder}, caller retains ownership. */
       public abstract Builder setTarget(@Nullable AccessibilityNodeInfoCompat target);
-
-      public abstract Builder setDirection(@SearchDirection int direction);
 
       public abstract Builder setFocusActionInfo(@Nullable FocusActionInfo focusActionInfo);
 
@@ -1368,25 +1491,15 @@ public abstract class Feedback {
 
       public abstract Builder setAction(Focus.Action action);
 
-      /** Copies node at{@link Focus.Builder}, caller retains ownership. */
-      public abstract Builder setScrolledNode(@Nullable AccessibilityNodeInfoCompat scrolledNode);
-
       public abstract Builder setScreenState(@Nullable ScreenState screenState);
 
-      abstract @Nullable AccessibilityNodeInfoCompat start();
+      public abstract Builder setStealNextWindowTarget(
+          @Nullable AccessibilityNodeInfoCompat stealNextWindowTarget);
 
-      abstract @Nullable AccessibilityNodeInfoCompat target();
+      public abstract Builder setStealNextWindowTargetDirection(
+          @SearchDirectionOrUnknown int stealNextWindowTargetDirection);
 
-      abstract @Nullable AccessibilityNodeInfoCompat scrolledNode();
-
-      abstract Focus autoBuild();
-
-      public Focus build() {
-        setStart(AccessibilityNodeInfoUtils.obtain(start()));
-        setTarget(AccessibilityNodeInfoUtils.obtain(target()));
-        setScrolledNode(AccessibilityNodeInfoUtils.obtain(scrolledNode()));
-        return autoBuild();
-      }
+      public abstract Focus build();
     }
 
     @Override
@@ -1395,13 +1508,17 @@ public abstract class Feedback {
           StringBuilderUtils.optionalField("action", action()),
           StringBuilderUtils.optionalSubObj("start", toStringShort(start())),
           StringBuilderUtils.optionalSubObj("target", toStringShort(target())),
-          StringBuilderUtils.optionalInt("direction", direction(), SEARCH_FOCUS_UNKNOWN),
           StringBuilderUtils.optionalSubObj("focusActionInfo", focusActionInfo()),
           StringBuilderUtils.optionalSubObj("navigationAction", navigationAction()),
           StringBuilderUtils.optionalText("searchKeyword", searchKeyword()),
           StringBuilderUtils.optionalTag("forceRefocus", forceRefocus()),
-          StringBuilderUtils.optionalSubObj("scrolledNode", toStringShort(scrolledNode())),
-          StringBuilderUtils.optionalSubObj("screenState", screenState()));
+          StringBuilderUtils.optionalSubObj("screenState", screenState()),
+          StringBuilderUtils.optionalSubObj(
+              "stealNextWindowTarget", toStringShort(stealNextWindowTarget())),
+          StringBuilderUtils.optionalInt(
+              "stealNextWindowTargetDirection",
+              stealNextWindowTargetDirection(),
+              SEARCH_FOCUS_UNKNOWN));
     }
   }
 
@@ -1485,6 +1602,22 @@ public abstract class Feedback {
     public abstract AdjustValue.Action action();
   }
 
+  /** Inner data-structure for typo traversal. */
+  @AutoValue
+  public abstract static class NavigateTypo {
+    /**
+     * AutoValue enforces the data field check. For interpreter events which do not contain region,
+     * fills an unused region to pass the AutoValue check
+     */
+    public static NavigateTypo create(boolean isNext, boolean useInputFocusIfEmpty) {
+      return new AutoValue_Feedback_NavigateTypo(isNext, useInputFocusIfEmpty);
+    }
+
+    public abstract boolean isNext();
+
+    public abstract boolean useInputFocusIfEmpty();
+  }
+
   /** Inner data-structure for adjust volume. */
   public abstract static class AdjustVolume {
 
@@ -1538,14 +1671,12 @@ public abstract class Feedback {
       NAVIGATE;
     }
 
-    @SearchDirection
+    @SearchDirectionOrUnknown
     public abstract int direction();
 
     @TargetType
     public abstract int htmlTargetType();
 
-    // TODO: Remove follow-focus events & actor logic, and instead pass focused node as
-    // argument to all focus-direction feedback.
     public abstract @Nullable AccessibilityNodeInfoCompat targetNode();
 
     public abstract boolean defaultToInputFocus();
@@ -1553,6 +1684,8 @@ public abstract class Feedback {
     public abstract boolean scroll();
 
     public abstract boolean wrap();
+
+    public abstract boolean toContainer();
 
     public abstract boolean toWindow();
 
@@ -1564,10 +1697,6 @@ public abstract class Feedback {
     public abstract boolean fromUser();
 
     public abstract FocusDirection.Action action();
-
-    public boolean hasDirection() {
-      return (direction() != SEARCH_FOCUS_UNKNOWN);
-    }
 
     public boolean hasHtmlTargetType() {
       return (htmlTargetType() != TARGET_DEFAULT);
@@ -1581,6 +1710,7 @@ public abstract class Feedback {
           .setDefaultToInputFocus(false)
           .setScroll(false)
           .setWrap(false)
+          .setToContainer(false)
           .setToWindow(false)
           .setInputMode(INPUT_MODE_UNKNOWN)
           .setFromUser(false);
@@ -1588,13 +1718,13 @@ public abstract class Feedback {
 
     /** Builder for FocusDirection feedback data */
     public abstract static class Builder {
-      public abstract Builder setDirection(@SearchDirection int direction);
+      public abstract Builder setDirection(@SearchDirectionOrUnknown int direction);
 
       public abstract Builder setHtmlTargetType(@TargetType int htmlTargetType);
 
       /**
-       * Copies targetNode at{@link FocusDirection.Builder}, caller retains ownership. This node can
-       * be used at{@link FocusDirection.Action} FOLLOW, SELECTION_MODE_ON and SET_GRANULARITY.
+       * This node can be used at {@link FocusDirection.Action} FOLLOW, SELECTION_MODE_ON and
+       * SET_GRANULARITY.
        */
       public abstract Builder setTargetNode(@Nullable AccessibilityNodeInfoCompat targetNode);
 
@@ -1603,6 +1733,8 @@ public abstract class Feedback {
       public abstract Builder setScroll(boolean scroll);
 
       public abstract Builder setWrap(boolean wrap);
+
+      public abstract Builder setToContainer(boolean toContainer);
 
       public abstract Builder setToWindow(boolean toWindow);
 
@@ -1614,14 +1746,7 @@ public abstract class Feedback {
 
       public abstract Builder setAction(FocusDirection.Action action);
 
-      abstract @Nullable AccessibilityNodeInfoCompat targetNode();
-
-      abstract FocusDirection autoBuild();
-
-      public FocusDirection build() {
-        setTargetNode(AccessibilityNodeInfoUtils.obtain(targetNode()));
-        return autoBuild();
-      }
+      public abstract FocusDirection build();
     }
 
     @Override
@@ -1634,6 +1759,7 @@ public abstract class Feedback {
           StringBuilderUtils.optionalTag("defaultToInputFocus", defaultToInputFocus()),
           StringBuilderUtils.optionalTag("scroll", scroll()),
           StringBuilderUtils.optionalTag("wrap", wrap()),
+          StringBuilderUtils.optionalTag("toContainer", toContainer()),
           StringBuilderUtils.optionalTag("toWindow", toWindow()),
           StringBuilderUtils.optionalInt("inputMode", inputMode(), INPUT_MODE_UNKNOWN),
           StringBuilderUtils.optionalField("granularity", granularity()),
@@ -1648,6 +1774,7 @@ public abstract class Feedback {
     /** Types of exclusive UI actions. */
     public enum Action {
       SHOW_SELECTOR_UI,
+      SHOW_GESTURE_ACTION_UI,
       HIDE,
       SUPPORT,
       NOT_SUPPORT
@@ -1660,11 +1787,6 @@ public abstract class Feedback {
     public abstract @Nullable CharSequence message();
 
     public abstract boolean showIcon();
-
-    public static TalkBackUI create(TalkBackUI.Action action, TalkBackUIActor.Type type) {
-      return new AutoValue_Feedback_TalkBackUI(
-          action, type, /* message= */ null, /* showIcon= */ true);
-    }
 
     public static TalkBackUI create(
         TalkBackUI.Action action,
@@ -1727,12 +1849,19 @@ public abstract class Feedback {
     public enum Action {
       /** Creates and performs caption requests for the focused node. */
       PERFORM_CAPTIONS,
+      CONFIRM_DOWNLOAD_AND_PERFORM_CAPTIONS,
+      INITIALIZE_ICON_DETECTION,
+      INITIALIZE_IMAGE_DESCRIPTION,
+      PERFORM_CAPTION_WITH_GEMINI,
+      DETAILED_DESCRIPTION_OPT_IN,
+      PERFORM_CAPTION_WITH_ON_DEVICE_GEMINI,
+      ON_DEVICE_DETAILED_DESCRIPTION_OPT_IN,
+      CONFIG_DETAILED_IMAGE_DESCRIPTIONS_SETTINGS,
     }
 
     public abstract ImageCaption.Action action();
 
-    /** Owned node. */
-    public abstract AccessibilityNodeInfoCompat target();
+    public abstract @Nullable AccessibilityNodeInfoCompat target();
 
     /** Return true, if the image-caption triggers by users. */
     public abstract boolean userRequested();
@@ -1747,19 +1876,45 @@ public abstract class Feedback {
 
       public abstract Builder setAction(ImageCaption.Action action);
 
-      /** Copies node at{@link ImageCaption.Builder}, caller retains ownership. */
-      public abstract Builder setTarget(AccessibilityNodeInfoCompat target);
+      public abstract Builder setTarget(@Nullable AccessibilityNodeInfoCompat target);
 
       public abstract Builder setUserRequested(boolean isUserRequested);
 
-      abstract AccessibilityNodeInfoCompat target();
+      public abstract ImageCaption build();
+    }
+  }
 
-      abstract ImageCaption autoBuild();
+  /** Inner data-structure for image caption result. */
+  @AutoValue
+  public abstract static class ImageCaptionResult {
+    public abstract int requestId();
 
-      public ImageCaption build() {
-        setTarget(AccessibilityNodeInfoUtils.obtain(target()));
-        return autoBuild();
-      }
+    /** Returns the text result, maybe an error message if {@link #isSuccess()} returns false */
+    public abstract String text();
+
+    /** Returns {@code true}, if the image captioning is successful. */
+    public abstract boolean isSuccess();
+
+    /** Return {@code true}, if the image-caption triggers by users. */
+    public abstract boolean userRequested();
+
+    public static ImageCaptionResult.Builder builder() {
+      return new AutoValue_Feedback_ImageCaptionResult.Builder();
+    }
+
+    /** Builder for ImageCaptionResult feedback data. */
+    @AutoValue.Builder
+    public abstract static class Builder {
+
+      public abstract Builder setRequestId(int id);
+
+      public abstract Builder setText(String text);
+
+      public abstract Builder setIsSuccess(boolean isSuccess);
+
+      public abstract Builder setUserRequested(boolean isUserRequested);
+
+      public abstract ImageCaptionResult build();
     }
   }
 
@@ -1800,7 +1955,115 @@ public abstract class Feedback {
     }
   }
 
-  // TODO: Add feedback types: braille, UI-action.
+  /** Inner data-structure for UniversalSearch. */
+  @AutoValue
+  public abstract static class UniversalSearch {
+
+    /** Types of exclusive UniversalSearch actions. */
+    public enum Action {
+      TOGGLE_SEARCH,
+      CANCEL_SEARCH,
+      HANDLE_SCREEN_STATE,
+      RENEW_OVERLAY
+    }
+
+    public abstract Action action();
+
+    public abstract @Nullable Configuration config();
+
+    public static UniversalSearch.Builder builder() {
+      return new AutoValue_Feedback_UniversalSearch.Builder();
+    }
+
+    /** Builder for UniversalSearch feedback data. */
+    @AutoValue.Builder
+    public abstract static class Builder {
+
+      public abstract Builder setAction(Action action);
+
+      public abstract Builder setConfig(@Nullable Configuration config);
+
+      public abstract UniversalSearch build();
+    }
+  }
+
+  /** Inner data-structure for Gemini requests. */
+  @AutoValue
+  public abstract static class GeminiRequest {
+
+    /** Types of exclusive GeminiRequest actions. */
+    public enum Action {
+      REQUEST,
+      REQUEST_ON_DEVICE_IMAGE_CAPTIONING
+    }
+
+    public abstract Action action();
+
+    public abstract int requestId();
+
+    @Nullable
+    public abstract String text();
+
+    public abstract Bitmap image();
+
+    public abstract boolean manualTrigger();
+
+    public static GeminiRequest.Builder builder() {
+      return new AutoValue_Feedback_GeminiRequest.Builder().setRequestId(-1).setManualTrigger(true);
+    }
+
+    /** Builder for GeminiRequest feedback data. */
+    @AutoValue.Builder
+    public abstract static class Builder {
+
+      public abstract Builder setAction(Action action);
+
+      public abstract Builder setRequestId(int requestId);
+
+      public abstract Builder setText(String text);
+
+      public abstract Builder setImage(Bitmap image);
+
+      public abstract Builder setManualTrigger(boolean manualTrigger);
+
+      public abstract GeminiRequest build();
+    }
+  }
+
+  /** Inner data-structure for requesting a service flag. */
+  @AutoValue
+  public abstract static class ServiceFlag {
+
+    /** Types of action to control service flags. */
+    public enum Action {
+      ENABLE_FLAG,
+      DISABLE_FLAG,
+    }
+
+    public abstract Action action();
+
+    public abstract int flag();
+
+    public static ServiceFlag create(ServiceFlag.Action action, int flag) {
+      return new AutoValue_Feedback_ServiceFlag(action, flag);
+    }
+  }
+
+  /** Inner data-structure for performing braille display action. */
+  @AutoValue
+  public abstract static class BrailleDisplay {
+
+    /** Types of action to performed by braille display. */
+    public enum Action {
+      TOGGLE_BRAILLE_DISPLAY_ON_OR_OFF,
+    }
+
+    public abstract BrailleDisplay.Action action();
+
+    public static BrailleDisplay create(BrailleDisplay.Action action) {
+      return new AutoValue_Feedback_BrailleDisplay(action);
+    }
+  }
 
   static String groupIdToString(int groupId) {
     switch (groupId) {
@@ -1808,8 +2071,6 @@ public abstract class Feedback {
         return "HINT";
       case GESTURE_VIBRATION:
         return "GESTURE_VIBRATION";
-      case CURSOR_STATE:
-        return "CURSOR_STATE";
       default:
         return "(unknown)";
     }

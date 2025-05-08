@@ -1,12 +1,28 @@
+/*
+ * Copyright (C) 2023 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 package com.google.android.accessibility.brailleime.keyboardview;
 
 import android.content.Context;
-import android.content.res.Configuration;
-import android.graphics.Region;
+import android.graphics.Rect;
 import android.hardware.display.DisplayManager;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
 import android.util.Size;
+import android.view.ContextThemeWrapper;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
@@ -16,6 +32,8 @@ import com.google.android.accessibility.braille.common.BrailleUserPreferences;
 import com.google.android.accessibility.braille.common.TouchDots;
 import com.google.android.accessibility.brailleime.BrailleIme;
 import com.google.android.accessibility.brailleime.BrailleImeLog;
+import com.google.android.accessibility.brailleime.BrailleInputOptions;
+import com.google.android.accessibility.brailleime.R;
 import com.google.android.accessibility.brailleime.Utils;
 import com.google.android.accessibility.brailleime.dialog.ViewAttachedDialog;
 import com.google.android.accessibility.brailleime.input.BrailleDisplayImeStripView;
@@ -24,6 +42,7 @@ import com.google.android.accessibility.brailleime.tutorial.TutorialView;
 import com.google.android.accessibility.brailleime.tutorial.TutorialView.TutorialCallback;
 import com.google.android.accessibility.brailleime.tutorial.TutorialView.TutorialState.State;
 import com.google.common.annotations.VisibleForTesting;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -76,13 +95,15 @@ public abstract class KeyboardView {
 
   /** A callback to notify clients of state changes. */
   public interface KeyboardViewCallback {
-    void onViewAdded();
+    void onViewReady();
 
     void onViewUpdated();
 
     void onViewCleared();
 
     void onAnnounce(String announcement, int delayMs);
+
+    boolean isHideScreenMode();
   }
 
   private DisplayManager displayManager;
@@ -96,7 +117,7 @@ public abstract class KeyboardView {
   protected ViewContainer viewContainer;
 
   protected KeyboardView(Context context, KeyboardViewCallback keyboardViewCallback) {
-    this.context = context;
+    this.context = new ContextThemeWrapper(context, R.style.BrailleImeTheme);
     this.keyboardViewCallback = keyboardViewCallback;
   }
 
@@ -109,10 +130,12 @@ public abstract class KeyboardView {
 
   /** Creates and returns ViewContainer. */
   public ViewContainer createViewContainer() {
+    if (isViewContainerCreated()) {
+      return viewContainer;
+    }
     init();
     viewContainer = createViewContainerInternal();
     updateViewContainerInternal();
-    viewContainer.setViewContainerCallback(viewContainerCallback);
     return viewContainer;
   }
 
@@ -151,39 +174,62 @@ public abstract class KeyboardView {
     return tutorialView != null && tutorialView.isShown();
   }
 
+  public boolean isTouchInteracting() {
+    return isInputViewCreated() && brailleInputView.isTouchInteracting();
+  }
+
   /** Creates {@link BrailleInputView} and adds it into {@link ViewContainer}. */
   public void createAndAddInputView(BrailleInputView.Callback inputPlaneCallback) {
-    runWhenViewIsReady(
-        viewContainer,
+    if (isInputViewAttached()) {
+      keyboardViewCallback.onViewReady();
+      return;
+    }
+    BrailleInputOptions options = obtainBrailleInputOptions();
+    runWhenViewContainerIsReady(
         () -> {
           brailleInputView =
-              new BrailleInputView(
-                  context, inputPlaneCallback, getScreenSize(), /* isTutorial= */ false);
+              new BrailleInputView(context, inputPlaneCallback, getScreenSize(), options);
           brailleInputView.setAccumulationMode(BrailleUserPreferences.readAccumulateMode(context));
           brailleInputView.setTableMode(
               BrailleUserPreferences.readLayoutMode(context) == TouchDots.TABLETOP);
-          viewContainer.addView(brailleInputView, keyboardViewCallback::onViewAdded);
+          viewContainer.addView(brailleInputView, keyboardViewCallback::onViewReady);
         });
   }
 
+  public void refreshInputView() {
+    BrailleInputOptions options = obtainBrailleInputOptions();
+    if (brailleInputView != null) {
+      brailleInputView.setOptions(options);
+    }
+  }
+
   public void createAndAddStripView(BrailleDisplayImeStripView.CallBack callback) {
-    runWhenViewIsReady(
-        viewContainer,
+    if (isStripViewAttached()) {
+      keyboardViewCallback.onViewReady();
+      return;
+    }
+    runWhenViewContainerIsReady(
         () -> {
           stripView = new BrailleDisplayImeStripView(context);
           stripView.setCallBack(callback);
-          viewContainer.addView(stripView, keyboardViewCallback::onViewAdded);
+          viewContainer.addView(stripView, keyboardViewCallback::onViewReady);
         });
   }
 
   /** Creates {@link TutorialView} and adds it into {@link ViewContainer}. */
   public void createAndAddTutorialView(State tutorialState, TutorialCallback tutorialCallback) {
-    runWhenViewIsReady(
-        viewContainer,
+    if (isTutorialViewAttached()) {
+      // On foldables, from unfold to fold, sometimes there is no onFinishInputView so view is still
+      // attached.
+      keyboardViewCallback.onViewReady();
+      tutorialView.switchState(tutorialState, /* delay= */ 0);
+      return;
+    }
+    runWhenViewContainerIsReady(
         () -> {
           tutorialView = new TutorialView(context, tutorialCallback, getScreenSize());
-          tutorialView.switchNextState(tutorialState, /* delay= */ 0);
-          viewContainer.addView(tutorialView, keyboardViewCallback::onViewAdded);
+          tutorialView.switchState(tutorialState, /* delay= */ 0);
+          viewContainer.addView(tutorialView, keyboardViewCallback::onViewReady);
         });
   }
 
@@ -195,10 +241,10 @@ public abstract class KeyboardView {
   public void showViewAttachedDialog(ViewAttachedDialog viewAttachedDialog) {
     if (viewContainer != null) {
       // Invoke show() when view is ready to prevents WindowManager$BadTokenException.
-      runWhenViewIsReady(viewContainer, () -> viewAttachedDialog.show(viewContainer));
+      runWhenViewContainerIsReady(() -> viewAttachedDialog.show(viewContainer));
     } else if (imeInputView != null) {
       // Invoke show() when view is ready to prevents WindowManager$BadTokenException.
-      runWhenViewIsReady(imeInputView, () -> viewAttachedDialog.show(imeInputView));
+      runWhenImeInputViewIsReady(() -> viewAttachedDialog.show(imeInputView));
     } else {
       throw new IllegalArgumentException("No available view to attach.");
     }
@@ -211,17 +257,28 @@ public abstract class KeyboardView {
     }
   }
 
-  public void tearDown() {
-    tearDownInternal();
-    if (viewContainer != null) {
-      viewContainer.removeAllViews();
-      viewContainer = null;
+  /** Gets braille input view's dot count. */
+  public int getBrailleInputViewDotCount() {
+    if (brailleInputView != null) {
+      return brailleInputView.getBrailleDotCount();
     }
-    stripView = null;
-    brailleInputView = null;
-    if (tutorialView != null) {
-      tutorialView.tearDown();
-      tutorialView = null;
+    return -1;
+  }
+
+  /** Returns whether in two step calibration */
+  public boolean inTwoStepCalibration() {
+    if (brailleInputView != null) {
+      return brailleInputView.inTwoStepCalibration();
+    }
+    return false;
+  }
+
+  /** Tear down keyboard view. */
+  public void tearDown() {
+    removeAllViews();
+    tearDownInternal();
+    if (viewContainer != null && viewContainer.getChildCount() == 0) {
+      viewContainer = null;
     }
     windowManager = null;
     keyboardViewCallback.onViewCleared();
@@ -231,10 +288,42 @@ public abstract class KeyboardView {
     }
   }
 
-  /** Returns imeInputView size. Return empty if imeInputView haven't generated. */
-  public Optional<Size> getViewForImeFrameworksSize() {
-    return Optional.ofNullable(imeInputView)
-        .map(value -> new Size(value.getWidth(), value.getHeight()));
+  /** Removes all views in keyboard view. */
+  @VisibleForTesting
+  void removeAllViews() {
+    if (viewContainer != null) {
+      viewContainer.removeAllViews();
+    }
+    stripView = null;
+    brailleInputView = null;
+    tutorialView = null;
+  }
+
+  /** Calibrates input view. */
+  public void calibrateBrailleInputView() {
+    if (brailleInputView == null) {
+      return;
+    }
+    brailleInputView.calibrateByTwoSteps();
+  }
+
+  /** Returns ime region size on the screen. */
+  public Optional<Rect> obtainImeViewRegion() {
+    View view = imeInputView;
+    if (isStripViewAttached()) {
+      view = stripView;
+    }
+    return Optional.ofNullable(view)
+        .map(
+            v -> {
+              int[] location = new int[2];
+              v.getLocationInWindow(location);
+              return new Rect(
+                  location[0],
+                  location[1],
+                  location[0] + v.getWidth(),
+                  location[1] + v.getHeight());
+            });
   }
 
   /** Returns BrailleDisplayImeStripView. */
@@ -242,24 +331,75 @@ public abstract class KeyboardView {
     return stripView;
   }
 
-  private void runWhenViewIsReady(View view, Runnable runnable) {
-    if (view.isShown() || "robolectric".equals(Build.FINGERPRINT)) {
+  private void runWhenViewContainerIsReady(Runnable runnable) {
+    if (isViewContainerShown() || Objects.equals(Build.FINGERPRINT, "robolectric")) {
       runnable.run();
       return;
     }
-    view.getViewTreeObserver()
+    viewContainer
+        .getViewTreeObserver()
         .addOnGlobalLayoutListener(
             new OnGlobalLayoutListener() {
               @Override
               public void onGlobalLayout() {
-                view.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                runnable.run();
+                if (isViewContainerShown()) {
+                  viewContainer.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                  runnable.run();
+                }
               }
             });
   }
 
-  /** Returns {@link ViewContainer} displaying region size on the screen. */
-  public abstract Optional<Region> obtainViewContainerRegionOnTheScreen();
+  private void runWhenImeInputViewIsReady(Runnable runnable) {
+    if (isImeInputViewShown() || Objects.equals(Build.FINGERPRINT, "robolectric")) {
+      runnable.run();
+      return;
+    }
+    imeInputView
+        .getViewTreeObserver()
+        .addOnGlobalLayoutListener(
+            new OnGlobalLayoutListener() {
+              @Override
+              public void onGlobalLayout() {
+                if (isImeInputViewShown()) {
+                  imeInputView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                  runnable.run();
+                }
+              }
+            });
+  }
+
+  private BrailleInputOptions obtainBrailleInputOptions() {
+    return BrailleInputOptions.builder()
+        .setReverseDots(BrailleUserPreferences.readReverseDotsMode(context))
+        .setBrailleType(BrailleUserPreferences.getCurrentTypingLanguageType(context))
+        .setTutorialMode(false)
+        .build();
+  }
+
+  private boolean isViewContainerShown() {
+    return isViewContainerCreated() && viewContainer.isShown();
+  }
+
+  private boolean isImeInputViewShown() {
+    return imeInputView != null && imeInputView.isShown();
+  }
+
+  private boolean isInputViewAttached() {
+    return brailleInputView != null
+        && viewContainer.isAttachedToWindow()
+        && viewContainer.contains(brailleInputView);
+  }
+
+  private boolean isTutorialViewAttached() {
+    return tutorialView != null
+        && viewContainer.isAttachedToWindow()
+        && viewContainer.contains(tutorialView);
+  }
+
+  private boolean isStripViewAttached() {
+    return stripView != null && viewContainer != null && viewContainer.isAttachedToWindow();
+  }
 
   /** Creates and returns the ImeInputView. */
   protected abstract View createImeInputViewInternal();
@@ -275,22 +415,28 @@ public abstract class KeyboardView {
 
   protected abstract void tearDownInternal();
 
-  private final ViewContainer.Callback viewContainerCallback =
-      new ViewContainer.Callback() {
-        @Override
-        public void onOrientationChanged(int orientation) {
-          BrailleImeLog.logD(TAG, "onOrientationChanged");
-          if (brailleInputView != null) {
-            brailleInputView.onOrientationChanged(orientation, getScreenSize());
-          }
-          if (tutorialView != null) {
-            tutorialView.onOrientationChanged(orientation, getScreenSize());
-          }
-          if (viewContainer != null) {
-            updateViewContainerInternal();
-          }
-        }
-      };
+  /**
+   * Sets alpha of the view container depends on either hide screen or show screen is triggered by
+   * Talkback.
+   */
+  public abstract void setKeyboardViewTransparent(boolean isTransparent);
+
+  /** Signals that a orientation change has occurred. */
+  public void onOrientationChanged(int orientation) {
+    BrailleImeLog.d(TAG, "onOrientationChanged");
+    if (brailleInputView != null) {
+      brailleInputView.onOrientationChanged(orientation, getScreenSize());
+    }
+    if (stripView != null) {
+      stripView.onOrientationChanged(orientation, getScreenSize());
+    }
+    if (tutorialView != null) {
+      tutorialView.onOrientationChanged(orientation, getScreenSize());
+    }
+    if (viewContainer != null) {
+      updateViewContainerInternal();
+    }
+  }
 
   private final DisplayManager.DisplayListener displayListener =
       new DisplayManager.DisplayListener() {
@@ -323,11 +469,6 @@ public abstract class KeyboardView {
   }
 
   @VisibleForTesting
-  public ViewContainer.Callback testing_getViewContainerCallback() {
-    return viewContainerCallback;
-  }
-
-  @VisibleForTesting
   public TutorialView testing_getTutorialView() {
     return tutorialView;
   }
@@ -341,45 +482,13 @@ public abstract class KeyboardView {
    */
   public static class ViewContainer extends FrameLayout {
 
-    /** A callback for receiving onConfigurationChanged from ViewContainer. */
-    public interface Callback {
-
-      /**
-       * Signals that a orientation change has occurred.
-       *
-       * <p>Since some components (such as InputMethodService instances) are not always informed of
-       * orientation changes, this method allows a View (which is always informed) to signal such a
-       * change to such a component.
-       */
-      void onOrientationChanged(int orientation);
-    }
-
     /** A callback for notify clients view status changed. */
     public interface ViewStatusCallback {
       void onViewAdded();
     }
 
-    private Callback callback;
-    private int orientation;
-
     public ViewContainer(Context context) {
       super(context);
-      this.orientation = getResources().getConfiguration().orientation;
-    }
-
-    public void setViewContainerCallback(Callback callback) {
-      this.callback = callback;
-    }
-
-    @Override
-    protected void onConfigurationChanged(Configuration newConfig) {
-      super.onConfigurationChanged(newConfig);
-      if (orientation != newConfig.orientation) {
-        orientation = newConfig.orientation;
-        if (callback != null) {
-          callback.onOrientationChanged(newConfig.orientation);
-        }
-      }
     }
 
     @Override
@@ -399,6 +508,15 @@ public abstract class KeyboardView {
                 }
               });
       addView(child);
+    }
+
+    private boolean contains(View view) {
+      for (int i = 0; i < getChildCount(); i++) {
+        if (getChildAt(i).equals(view)) {
+          return true;
+        }
+      }
+      return false;
     }
   }
 }

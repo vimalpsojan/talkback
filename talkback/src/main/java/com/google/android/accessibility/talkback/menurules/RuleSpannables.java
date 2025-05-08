@@ -18,9 +18,8 @@ package com.google.android.accessibility.talkback.menurules;
 
 import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.MENU_ITEM_UNKNOWN;
 import static com.google.android.accessibility.talkback.analytics.TalkBackAnalytics.MENU_TYPE_SPANNABLES;
-import static com.google.android.accessibility.utils.AccessibilityNodeInfoUtils.TARGET_SPAN_CLASS;
+import static com.google.android.accessibility.utils.AccessibilityNodeInfoUtils.BASE_CLICKABLE_SPAN;
 
-import android.accessibilityservice.AccessibilityService;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -59,29 +58,26 @@ public class RuleSpannables extends NodeMenuRule {
   }
 
   @Override
-  public boolean accept(AccessibilityService service, AccessibilityNodeInfoCompat node) {
-    return SpannableTraversalUtils.hasTargetSpanInNodeTreeDescription(node, TARGET_SPAN_CLASS);
+  public boolean accept(Context context, AccessibilityNodeInfoCompat node) {
+    return SpannableTraversalUtils.hasTargetClickableSpanInNodeTree(node, BASE_CLICKABLE_SPAN);
   }
 
   @Override
   public List<ContextMenuItem> getMenuItemsForNode(
-      AccessibilityService service, AccessibilityNodeInfoCompat node, boolean includeAncestors) {
+      Context context, AccessibilityNodeInfoCompat node, boolean includeAncestors) {
     final List<SpannableString> spannableStrings = new ArrayList<>();
 
     // TODO: Refactor to provide a general menu-cleanup method.
     // TODO: When Robolectric copies extras bundle, add unit test.
-    SpannableTraversalUtils.collectSpannableStringsWithTargetSpanInNodeDescriptionTree(
-        node, // Root node of description tree
-        TARGET_SPAN_CLASS, // Target span class
-        spannableStrings // List of SpannableStrings collected
-        );
+    SpannableTraversalUtils.getSpannableStringsWithTargetClickableSpanInNodeTree(
+        node, BASE_CLICKABLE_SPAN, spannableStrings);
 
     final List<ContextMenuItem> result = new ArrayList<>();
     for (SpannableString spannable : spannableStrings) {
       if (spannable == null) {
         continue;
       }
-      final Object[] spans = spannable.getSpans(0, spannable.length(), TARGET_SPAN_CLASS);
+      final Object[] spans = spannable.getSpans(0, spannable.length(), BASE_CLICKABLE_SPAN);
       if ((spans == null) || (spans.length == 0)) {
         continue;
       }
@@ -93,14 +89,14 @@ public class RuleSpannables extends NodeMenuRule {
         ContextMenuItem menuItem = null;
         if (span instanceof URLSpan) {
           // For ir-relative UrlSpans, open the link with browser directly.
-          menuItem = createMenuItemForUrlSpan(service, i, spannable, (URLSpan) span, analytics);
+          menuItem = createMenuItemForUrlSpan(context, i, spannable, (URLSpan) span, analytics);
         }
         // For other kinds of ClickableSpans(including relative UrlSpan) from O, activate it with
         // ClickableSpan.onClick(null).
         if (menuItem == null && span instanceof ClickableSpan) {
           menuItem =
               createMenuItemForClickableSpan(
-                  service, i, spannable, (ClickableSpan) span, analytics);
+                  context, i, spannable, (ClickableSpan) span, analytics);
         }
         if (menuItem != null) {
           result.add(menuItem);
@@ -143,10 +139,11 @@ public class RuleSpannables extends NodeMenuRule {
     // on the menu item will invoke ClickableSpans in the label text instead of calling
     // MenuItemClickListener. Thus we should remove ClickableSpans from label text.
     // Also apply this rule to pre-O in order to have consistent text appearance.
-    SpannableUtils.stripTargetSpanFromText(label, TARGET_SPAN_CLASS);
+    SpannableUtils.stripTargetSpanFromText(label, BASE_CLICKABLE_SPAN);
     final ContextMenuItem item =
         ContextMenu.createMenuItem(context, R.id.group_links, itemId, Menu.NONE, label);
-    item.setOnMenuItemClickListener(new UrlSpanMenuItemClickListener(context, uri, analytics));
+    item.setOnMenuItemClickListener(
+        new UrlSpanMenuItemClickListener(context, span, uri, analytics));
     return item;
   }
 
@@ -167,7 +164,7 @@ public class RuleSpannables extends NodeMenuRule {
       return null;
     }
 
-    SpannableUtils.stripTargetSpanFromText(label, TARGET_SPAN_CLASS);
+    SpannableUtils.stripTargetSpanFromText(label, BASE_CLICKABLE_SPAN);
     final ContextMenuItem item =
         ContextMenu.createMenuItem(context, R.id.group_links, itemId, Menu.NONE, label);
     item.setOnMenuItemClickListener(
@@ -179,11 +176,14 @@ public class RuleSpannables extends NodeMenuRule {
   private static class UrlSpanMenuItemClickListener implements OnContextMenuItemClickListener {
 
     final Context context;
+    final URLSpan span;
     final Uri uri;
     final TalkBackAnalytics analytics;
 
-    public UrlSpanMenuItemClickListener(Context context, Uri uri, TalkBackAnalytics analytics) {
+    public UrlSpanMenuItemClickListener(
+        Context context, URLSpan span, Uri uri, TalkBackAnalytics analytics) {
       this.context = context;
+      this.span = span;
       this.uri = uri;
       this.analytics = analytics;
     }
@@ -195,6 +195,16 @@ public class RuleSpannables extends NodeMenuRule {
       }
 
       analytics.onLocalContextMenuAction(MENU_TYPE_SPANNABLES, MENU_ITEM_UNKNOWN);
+      // TODO: We accept URLSpan from content descriptions, which is not expected by
+      // framework, but already "abused" by some apps. To avoid unexpected anonymous crashes, wrap
+      // the URLSpan.onClick() with try-catch structure.
+      try {
+        span.onClick(null);
+        return true;
+      } catch (Exception e) {
+        LogUtils.e(TAG, "Failed to invoke URLSpan: %s\n%s", item.getTitle(), e);
+      }
+      // Fall back to handle url with Intent of ACTION_VIEW
       final Intent intent = new Intent(Intent.ACTION_VIEW, uri);
       intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       try {

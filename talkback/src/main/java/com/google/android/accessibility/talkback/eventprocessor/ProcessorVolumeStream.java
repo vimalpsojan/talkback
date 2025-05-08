@@ -18,7 +18,6 @@ package com.google.android.accessibility.talkback.eventprocessor;
 
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.os.Message;
 import android.os.PowerManager;
@@ -27,13 +26,10 @@ import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import com.google.android.accessibility.talkback.ActorState;
-import com.google.android.accessibility.talkback.R;
 import com.google.android.accessibility.talkback.TalkBackService;
 import com.google.android.accessibility.utils.AccessibilityEventListener;
-import com.google.android.accessibility.utils.FeatureSupport;
 import com.google.android.accessibility.utils.Performance.EventId;
 import com.google.android.accessibility.utils.ServiceKeyEventListener;
-import com.google.android.accessibility.utils.SharedPreferencesUtils;
 import com.google.android.accessibility.utils.WeakReferenceHandler;
 import com.google.android.accessibility.utils.compat.media.AudioManagerCompatUtils;
 import com.google.android.accessibility.utils.output.SpeechController;
@@ -78,16 +74,19 @@ public class ProcessorVolumeStream
   /** Handler for completing volume key handling outside of the main key-event handler. */
   private final VolumeStreamHandler handler = new VolumeStreamHandler(this);
 
+  private final TouchInteractingIndicator touchInteractingIndicator;
+
   /**
    * Whether touch interaction is in progress. In practice, a true value means that a single finger
    * is on the screen.
    */
+  // TODO: b/212947934#comment9. If the proposal confirmed, it needs
+  // 1. Removes the non Accessibility volume change logic.
+  // 2. Stops implementing the AccessibilityEventListener
   private boolean isTouchInteracting = false;
 
-  private SharedPreferences prefs;
-  private TalkBackService service;
   private final ActorState actorState;
-  private VolumeButtonPatternDetector patternDetector;
+  private final VolumeButtonPatternDetector patternDetector;
 
   private final MostRecentVolumeKeyAdjustment mostRecentVolumeKeyAdjustment =
       new MostRecentVolumeKeyAdjustment();
@@ -115,19 +114,21 @@ public class ProcessorVolumeStream
   }
 
   @SuppressWarnings("deprecation")
-  public ProcessorVolumeStream(ActorState actorState, TalkBackService service) {
+  public ProcessorVolumeStream(
+      ActorState actorState,
+      TalkBackService service,
+      TouchInteractingIndicator touchInteractingIndicator) {
 
     audioManager = (AudioManager) service.getSystemService(Context.AUDIO_SERVICE);
     this.actorState = actorState;
+    this.touchInteractingIndicator = touchInteractingIndicator;
 
     final PowerManager pm = (PowerManager) service.getSystemService(Context.POWER_SERVICE);
     wakeLock =
         pm.newWakeLock(
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE, WL_TAG);
 
-    prefs = SharedPreferencesUtils.getSharedPreferences(service);
-    this.service = service;
-    patternDetector = new VolumeButtonPatternDetector(this.service);
+    patternDetector = new VolumeButtonPatternDetector(service);
     patternDetector.setOnPatternMatchListener(this);
   }
 
@@ -168,31 +169,6 @@ public class ProcessorVolumeStream
     return true;
   }
 
-  private void handleBothVolumeKeysLongPressed(EventId eventId) {
-    // Shortcut for accessibility on/off replaces talkback-suspend.
-    if (FeatureSupport.hasAccessibilityShortcut(service)) {
-      return;
-    }
-
-    // Check whether user enabled the volume-key shortcut for suspending talkback.
-    boolean shortcutEnabled =
-        SharedPreferencesUtils.getBooleanPref(
-            prefs,
-            service.getResources(),
-            R.string.pref_two_volume_long_press_key,
-            R.bool.pref_resume_volume_buttons_long_click_default);
-    if (!shortcutEnabled) {
-      return;
-    }
-
-    // Toggle talkback suspended state.
-    if (service.isInstanceActive()) {
-      service.requestSuspendTalkBack(eventId);
-    } else {
-      service.resumeTalkBack(eventId);
-    }
-  }
-
   private void adjustVolumeFromKeyEvent(int button) {
     final int direction =
         ((button == VolumeButtonPatternDetector.VOLUME_UP)
@@ -202,7 +178,9 @@ public class ProcessorVolumeStream
 
     // While continuous reading is active, we do not want to show the UI and interrupt continuous
     // reading.
-    if (isTouchInteracting || actorState.getContinuousRead().isActive()) {
+    if (isTouchInteracting
+        || actorState.getContinuousRead().isActive()
+        || touchInteractingIndicator.isTouchInteracting()) {
       shouldRouteToAccessibilityStream = true;
     } else {
       boolean mostRecentAdjustmentJustHappened = mostRecentVolumeKeyAdjustment.onKeyPressed();
@@ -248,10 +226,6 @@ public class ProcessorVolumeStream
         break;
       case VolumeButtonPatternDetector.LONG_PRESS_PATTERN:
         handleSingleLongTap(buttonCombination);
-        break;
-      case VolumeButtonPatternDetector.TWO_BUTTONS_LONG_PRESS_PATTERN:
-        handleBothVolumeKeysLongPressed(eventId);
-        patternDetector.clearState();
         break;
       default: // fall out
     }
@@ -306,5 +280,11 @@ public class ProcessorVolumeStream
               /* what= */ 0, /* arg1= */ patternCode, /* arg2= */ buttonCombination, eventId);
       sendMessage(msg);
     }
+  }
+
+  /** Indicator determines whether volume key events with touch event. */
+  public interface TouchInteractingIndicator {
+    /** Indicates if a finger is currently touching the touch-display. */
+    boolean isTouchInteracting();
   }
 }

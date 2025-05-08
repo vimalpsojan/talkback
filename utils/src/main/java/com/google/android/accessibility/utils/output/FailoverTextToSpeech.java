@@ -16,8 +16,12 @@
 
 package com.google.android.accessibility.utils.output;
 
-import android.annotation.TargetApi;
-import android.content.BroadcastReceiver;
+import static android.speech.tts.TextToSpeech.LANG_AVAILABLE;
+import static android.speech.tts.TextToSpeech.LANG_COUNTRY_AVAILABLE;
+import static android.speech.tts.TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE;
+import static androidx.core.content.ContextCompat.RECEIVER_EXPORTED;
+import static java.util.Locale.forLanguageTag;
+
 import android.content.ComponentCallbacks;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -28,31 +32,42 @@ import android.database.ContentObserver;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.os.PowerManager;
+import android.os.PowerManager.WakeLock;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.provider.Settings.Secure;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.TextToSpeech.Engine;
 import android.speech.tts.TextToSpeech.OnInitListener;
 import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 import android.telephony.TelephonyManager;
+import android.text.Spannable;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
+import androidx.core.content.ContextCompat;
 import com.google.android.accessibility.utils.BuildVersionUtils;
+import com.google.android.accessibility.utils.Logger;
 import com.google.android.accessibility.utils.Performance;
+import com.google.android.accessibility.utils.Performance.EventId;
+import com.google.android.accessibility.utils.SpannableUtils.IdentifierSpan;
 import com.google.android.accessibility.utils.WeakReferenceHandler;
+import com.google.android.accessibility.utils.broadcast.SameThreadBroadcastReceiver;
 import com.google.android.accessibility.utils.compat.provider.SettingsCompatUtils.SecureCompatUtils;
 import com.google.android.accessibility.utils.compat.speech.tts.TextToSpeechCompatUtils;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import com.google.auto.value.AutoValue;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -85,16 +100,23 @@ public class FailoverTextToSpeech {
   /** Maximum number of TTS error messages to print to the log. */
   private static final int MAX_LOG_MESSAGES = 10;
 
+  public static final String AGGRESSIVE_CHUNK = "AggressiveChunk";
+
+  public static final int VALUE_ON = 1;
+
   /** Class defining constants used for describing speech parameters. */
   public static class SpeechParam {
     /** Float parameter for controlling speech volume. Range is {0 ... 2}. */
-    public static final String VOLUME = TextToSpeech.Engine.KEY_PARAM_VOLUME;
+    public static final String VOLUME = Engine.KEY_PARAM_VOLUME;
 
     /** Float parameter for controlling speech rate. Range is {0 ... 2}. */
     public static final String RATE = "rate";
 
     /** Float parameter for controlling speech pitch. Range is {0 ... 2}. */
     public static final String PITCH = "pitch";
+
+    public static final String FALLBACK_LOCALE =
+        "com.google.android.tts:EnableEnUsVoiceSelectionFallback";
   }
 
   /**
@@ -154,21 +176,23 @@ public class FailoverTextToSpeech {
   /** The engine loading into the temporary TTS. */
   private @Nullable String mTempTtsEngine;
 
-  /** The rate adjustment specified in {@link android.provider.Settings}. */
+  /** The rate adjustment specified in {@link Settings}. */
   private float mDefaultRate;
 
-  /** The pitch adjustment specified in {@link android.provider.Settings}. */
+  /** The pitch adjustment specified in {@link Settings}. */
   private float mDefaultPitch;
 
-  private List<FailoverTtsListener> mListeners = new ArrayList<>();
+  private final List<FailoverTtsListener> listeners = new ArrayList<>();
 
   /** Wake lock for keeping the device unlocked while reading */
-  private PowerManager.WakeLock mWakeLock;
+  private WakeLock mWakeLock;
 
   private final AudioManager mAudioManager;
   private final TelephonyManager mTelephonyManager;
 
   private boolean mShouldHandleTtsCallbackInMainThread = true;
+
+  private final boolean cacheTtsLocale;
 
   /**
    * A buffer of N most recent utterance ids, used to ensure that a recent utterance's completion
@@ -177,8 +201,13 @@ public class FailoverTextToSpeech {
   private LinkedList<String> mRecentUtteranceIds = new LinkedList<>(); // may contain nulls
 
   public FailoverTextToSpeech(Context context) {
+    this(context, /* cacheTtsLocale= */ true);
+  }
+
+  public FailoverTextToSpeech(Context context, boolean cacheTtsLocale) {
     mContext = context;
-    mContext.registerReceiver(mMediaStateMonitor, mMediaStateMonitor.getFilter());
+    ContextCompat.registerReceiver(
+        context, mMediaStateMonitor, mMediaStateMonitor.getFilter(), RECEIVER_EXPORTED);
 
     final Uri defaultSynth = Secure.getUriFor(Secure.TTS_DEFAULT_SYNTH);
     final Uri defaultPitch = Secure.getUriFor(Secure.TTS_DEFAULT_PITCH);
@@ -202,6 +231,7 @@ public class FailoverTextToSpeech {
     initWakeLock(context);
     mAudioManager = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
     mTelephonyManager = (TelephonyManager) mContext.getSystemService(Context.TELEPHONY_SERVICE);
+    this.cacheTtsLocale = cacheTtsLocale;
   }
 
   /** Separate function for overriding in unit tests, because WakeLock cannot be mocked. */
@@ -212,12 +242,21 @@ public class FailoverTextToSpeech {
   }
 
   /**
-   * Add a new listener for changes in speaking state.
+   * Adds a new listener for changes in speaking state.
    *
    * @param listener The listener to add.
    */
   public void addListener(FailoverTtsListener listener) {
-    mListeners.add(listener);
+    listeners.add(listener);
+  }
+
+  /**
+   * Removes the given listener.
+   *
+   * @param listener The listener to remove.
+   */
+  public void removeListener(FailoverTtsListener listener) {
+    listeners.remove(listener);
   }
 
   /**
@@ -264,16 +303,22 @@ public class FailoverTextToSpeech {
    * @param pitch The pitch adjustment, in the range [0 ... 1].
    * @param rate The rate adjustment, in the range [0 ... 1].
    * @param params The parameters to pass to the text-to-speech engine.
+   * @param customFlags to adapt information such as performance features.
+   * @param flushGlobalTtsQueue Whether to flush the global TTS queue.
+   * @param eventId {@link EventTypeId}
    */
   public void speak(
       CharSequence text,
       @Nullable Locale locale,
       float pitch,
       float rate,
-      HashMap<String, String> params,
+      Map<String, String> params,
+      Map<String, Integer> customFlags,
       int stream,
       float volume,
-      boolean preventDeviceSleep) {
+      boolean preventDeviceSleep,
+      boolean flushGlobalTtsQueue,
+      EventId eventId) {
 
     String utteranceId = params.get(Engine.KEY_PARAM_UTTERANCE_ID);
     addRecentUtteranceId(utteranceId);
@@ -289,12 +334,23 @@ public class FailoverTextToSpeech {
     volume *= calculateVolumeAdjustment();
 
     if (preventDeviceSleep && mWakeLock != null && !mWakeLock.isHeld()) {
-      mWakeLock.acquire();
+      mWakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
     }
 
     Exception failureException = null;
     try {
-      result = trySpeak(text, locale, pitch, rate, params, stream, volume);
+      result =
+          trySpeak(
+              text,
+              locale,
+              pitch,
+              rate,
+              params,
+              customFlags,
+              stream,
+              volume,
+              flushGlobalTtsQueue,
+              eventId);
     } catch (Exception e) {
       failureException = e;
       result = TextToSpeech.ERROR;
@@ -317,7 +373,7 @@ public class FailoverTextToSpeech {
     }
   }
 
-  /** Adjust volume if we are in a phone call and speaking with phone audio stream * */
+  /** Adjust volume if we are in a phone call and speaking with phone audio stream */
   private float calculateVolumeAdjustment() {
     float multiple = 1.0f;
 
@@ -361,7 +417,7 @@ public class FailoverTextToSpeech {
     return multiple;
   }
 
-  /** Releases the {@link PowerManager.WakeLock} */
+  /** Releases the {@link WakeLock} */
   private void allowDeviceSleep() {
     allowDeviceSleep(null);
   }
@@ -370,10 +426,15 @@ public class FailoverTextToSpeech {
     if (mWakeLock != null && mWakeLock.isHeld()) {
       boolean isRecent = mRecentUtteranceIds.contains(completedUtteranceId);
       boolean isLast =
-          mRecentUtteranceIds.size() > 0
+          !mRecentUtteranceIds.isEmpty()
               && mRecentUtteranceIds.getLast().equals(completedUtteranceId);
       if (completedUtteranceId == null || isLast || !isRecent) {
-        mWakeLock.release();
+        try {
+          mWakeLock.release();
+        } catch (RuntimeException unused) {
+          // Ignore: already released by timeout.
+          // TODO: Log this exception from GoogleLogger.
+        }
       }
     }
   }
@@ -439,6 +500,9 @@ public class FailoverTextToSpeech {
    * @param pitch to speak text in.
    * @param rate to speak text in.
    * @param params to the TTS.
+   * @param customFlags to adapt information such as performance features.
+   * @param flushGlobalTtsQueue If the global TTS queue should be flushed.
+   * @param eventId event id
    * @return The result of speaking the specified text.
    */
   private int trySpeak(
@@ -446,9 +510,12 @@ public class FailoverTextToSpeech {
       @Nullable Locale locale,
       float pitch,
       float rate,
-      HashMap<String, String> params,
+      Map<String, String> params,
+      Map<String, Integer> customFlags,
       int stream,
-      float volume) {
+      float volume,
+      boolean flushGlobalTtsQueue,
+      EventId eventId) {
     if (mTts == null) {
       return TextToSpeech.ERROR;
     }
@@ -457,18 +524,60 @@ public class FailoverTextToSpeech {
     float effectiveRate = (rate * mDefaultRate);
 
     String utteranceId = params.get(Engine.KEY_PARAM_UTTERANCE_ID);
-    if ((locale != null) && !locale.equals(mLastUtteranceLocale)) {
-      if (attemptSetLanguage(locale)) {
+    boolean isLocaleAttached = locale != null;
+    Locale previousLocale = localeInUse;
+    boolean changeLocale = false;
+    if (isLocaleAttached && !locale.equals(mLastUtteranceLocale)) {
+      localeInUse = attemptSetLanguage(locale);
+      if (localeInUse != null) {
         mLastUtteranceLocale = locale;
       }
-    } else if ((locale == null) && (mLastUtteranceLocale != null)) {
-      ensureSupportedLocale();
+      changeLocale = true;
+    } else if (!isLocaleAttached && (mLastUtteranceLocale != null)) {
+      localeInUse = ensureSupportedLocale();
       mLastUtteranceLocale = null;
+      changeLocale = true;
     }
-    int result = speak(text, params, utteranceId, effectivePitch, effectiveRate, stream, volume);
+    boolean changeToSameLocale =
+        changeLocale && previousLocale != null && previousLocale.equals(localeInUse);
+    UtteranceInfoCombo.Builder utteranceInfoCombo =
+        UtteranceInfoCombo.builder(text, localeInUse, isLocaleAttached)
+            .setFlushGlobalTtsQueue(flushGlobalTtsQueue);
+
+    if ((text instanceof Spannable)) {
+      Spannable spannable = (Spannable) text;
+      IdentifierSpan[] identifierSpans = spannable.getSpans(0, text.length(), IdentifierSpan.class);
+      if (identifierSpans.length > 0) {
+        utteranceInfoCombo.setIsSeparatorInUtterance(true);
+        for (IdentifierSpan identifierSpan : identifierSpans) {
+          spannable.removeSpan(identifierSpan);
+        }
+      }
+    }
+
+    if (customFlags.get(AGGRESSIVE_CHUNK) != null
+        && customFlags.get(AGGRESSIVE_CHUNK) == VALUE_ON) {
+      utteranceInfoCombo.setIsAggressiveChunking(true);
+    }
+    UtteranceInfoCombo utteranceInfo = utteranceInfoCombo.build();
+    for (FailoverTtsListener mListener : listeners) {
+      mListener.onBeforeUtteranceRequested(utteranceId, utteranceInfo);
+    }
+    int result =
+        speak(
+            text,
+            params,
+            utteranceId,
+            effectivePitch,
+            effectiveRate,
+            stream,
+            volume,
+            flushGlobalTtsQueue,
+            changeToSameLocale,
+            eventId);
 
     if (result != TextToSpeech.SUCCESS) {
-      ensureSupportedLocale();
+      localeInUse = ensureSupportedLocale();
     }
 
     LogUtils.d(TAG, "Speak call for %s returned %d", utteranceId, result);
@@ -477,12 +586,15 @@ public class FailoverTextToSpeech {
 
   private int speak(
       CharSequence text,
-      HashMap<String, String> params,
+      Map<String, String> params,
       String utteranceId,
       float pitch,
       float rate,
       int stream,
-      float volume) {
+      float volume,
+      boolean flushGlobalTtsQueue,
+      boolean changeToSameLocale,
+      EventId eventId) {
     Bundle bundle = new Bundle();
 
     if (params != null) {
@@ -495,9 +607,20 @@ public class FailoverTextToSpeech {
     bundle.putInt(SpeechParam.RATE, (int) (rate * 100));
     bundle.putInt(Engine.KEY_PARAM_STREAM, stream);
     bundle.putFloat(SpeechParam.VOLUME, volume);
+    // When the language in use in not available, TTS will use en-us as the fallback locale.
+    bundle.putString(SpeechParam.FALLBACK_LOCALE, "true");
 
     ensureQueueFlush();
-    return mTts.speak(text, SPEECH_FLUSH_ALL, bundle, utteranceId);
+
+    int queueMode = flushGlobalTtsQueue ? SPEECH_FLUSH_ALL : TextToSpeech.QUEUE_ADD;
+
+    // Track latency from event received to feedback queued.
+    if (eventId != null && utteranceId != null) {
+      Performance.getInstance()
+          .onFeedbackQueued(eventId, utteranceId, flushGlobalTtsQueue, changeToSameLocale);
+    }
+
+    return mTts.speak(text, queueMode, bundle, utteranceId);
   }
 
   /**
@@ -594,6 +717,7 @@ public class FailoverTextToSpeech {
 
     mTempTts = null;
     mTempTtsEngine = null;
+    cachedTtsLocale = null;
 
     if (status != TextToSpeech.SUCCESS) {
       attemptTtsFailover(tempTtsEngine);
@@ -620,12 +744,13 @@ public class FailoverTextToSpeech {
     mTts.setAudioAttributes(
         new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+            .setFlags(AudioAttributes.FLAG_LOW_LATENCY)
             .build());
 
     LogUtils.i(TAG, "Switched to TTS engine: %s", tempTtsEngine);
 
-    for (FailoverTtsListener mListener : mListeners) {
-      mListener.onTtsInitialized(isSwitchingEngines);
+    for (FailoverTtsListener mListener : listeners) {
+      mListener.onTtsInitialized(isSwitchingEngines, tempTtsEngine);
     }
   }
 
@@ -634,10 +759,13 @@ public class FailoverTextToSpeech {
    *
    * @param utteranceId The utteranceId from the onUtteranceStarted callback - we expect this to
    *     consist of UTTERANCE_ID_PREFIX followed by the utterance index.
+   * @param delay The time in milliseconds elapsed between {@link
+   *     UtteranceProgressListener#onStart(String)} invoked and the callback dispatched by {@link
+   *     SpeechHandler}.
    */
-  private void handleUtteranceStarted(String utteranceId) {
-    for (FailoverTtsListener mListener : mListeners) {
-      mListener.onUtteranceStarted(utteranceId);
+  private void handleUtteranceStarted(String utteranceId, long delay) {
+    for (FailoverTtsListener mListener : listeners) {
+      mListener.onUtteranceStarted(utteranceId, delay);
     }
   }
 
@@ -650,7 +778,7 @@ public class FailoverTextToSpeech {
    * @param end The end index of the range in the utterance text.
    */
   private void handleUtteranceRangeStarted(String utteranceId, int start, int end) {
-    for (FailoverTtsListener mListener : mListeners) {
+    for (FailoverTtsListener mListener : listeners) {
       mListener.onUtteranceRangeStarted(utteranceId, start, end);
     }
   }
@@ -669,7 +797,7 @@ public class FailoverTextToSpeech {
       mTtsFailures = 0;
     }
     allowDeviceSleep(utteranceId);
-    for (FailoverTtsListener mListener : mListeners) {
+    for (FailoverTtsListener mListener : listeners) {
       mListener.onUtteranceCompleted(utteranceId, success);
     }
   }
@@ -752,9 +880,23 @@ public class FailoverTextToSpeech {
 
   /**
    * The locale specified by the last utterance with {@link #speak(CharSequence, Locale, float,
-   * float, HashMap, int, float, boolean)}.
+   * float, HashMap, int, float, boolean, boolean)}.
    */
   private @Nullable Locale mLastUtteranceLocale = null;
+
+  // TODO: Replace it with cachedTtsLocale.
+  /**
+   * Keep the recently in used locale by TTS. Querying current TTS' language is time-consuming, we
+   * use this cache variable to save time.
+   */
+  private @Nullable Locale localeInUse = null;
+
+  /**
+   * Caches the locale previously set using {@link TextToSpeech#setLanguage(Locale)}. Since setting
+   * the language on a `TextToSpeech` instance can be a time-consuming operation, this cache helps
+   * to avoid redundant calls and improve performance.
+   */
+  private @Nullable Locale cachedTtsLocale;
 
   /**
    * Helper method that ensures the text-to-speech engine works even when the user is using the
@@ -763,15 +905,15 @@ public class FailoverTextToSpeech {
    * <p>This method should be called whenever the TTS engine is loaded, the system locale changes,
    * or the default TTS locale changes.
    */
-  private void ensureSupportedLocale() {
+  private @Nullable Locale ensureSupportedLocale() {
     if (needsFallbackLocale()) {
-      attemptSetFallbackLanguage();
+      return attemptSetFallbackLanguage();
     } else {
       // We might need to restore the system locale. Or, if we've ever
       // explicitly set the locale, we'll need to work around a bug where
       // there's no way to tell the TTS engine to use whatever it thinks
       // the default language should be.
-      attemptRestorePreferredLocale();
+      return attemptRestorePreferredLocale();
     }
   }
 
@@ -796,14 +938,15 @@ public class FailoverTextToSpeech {
   }
 
   /** Attempts to obtain and set a fallback TTS locale. */
-  private void attemptSetFallbackLanguage() {
+  private @Nullable Locale attemptSetFallbackLanguage() {
     final Locale fallbackLocale = getBestAvailableLocale();
     if (fallbackLocale == null) {
       LogUtils.e(TAG, "Failed to find fallback locale");
-      return;
+      return null;
     }
     LogUtils.v(TAG, "Attempt setting fallback TTS locale.");
-    attemptSetLanguage(fallbackLocale);
+    LogUtils.v(TAG, "attemptSetFallbackLanguage fallback tts locale.");
+    return attemptSetLanguage(fallbackLocale);
   }
 
   /**
@@ -812,24 +955,55 @@ public class FailoverTextToSpeech {
    * @param locale TTS locale to set.
    * @return {@code true} if successfully set the TTS locale.
    */
-  private boolean attemptSetLanguage(Locale locale) {
+  private @Nullable Locale attemptSetLanguage(@Nullable Locale locale) {
     if (locale == null) {
       LogUtils.w(TAG, "Cannot set null locale.");
-      return false;
+      return null;
     }
     if (mTts == null) {
       LogUtils.e(TAG, "mTts null when setting locale.");
-      return false;
+      return null;
     }
 
-    final int status = mTts.setLanguage(locale);
+    final int status = setTtsLocale(locale);
     if (isNotAvailableStatus(status)) {
       LogUtils.e(TAG, "Failed to set locale to %s", locale);
-      return false;
+      return null;
     }
 
-    LogUtils.v(TAG, "Set locale to %s", locale);
-    return true;
+    LogUtils.v(TAG, "attemptSetLanguage- Set locale to %s", locale);
+    return locale;
+  }
+
+  private int setTtsLocale(Locale locale) {
+    LogUtils.d(TAG, "set ttsLocale: cachedlocale=%s with locale %s", cachedTtsLocale, locale);
+    if (cachedTtsLocale != null && cachedTtsLocale.equals(locale)) {
+      return LANG_AVAILABLE;
+    }
+
+    int status = mTts.setLanguage(locale);
+    LogUtils.d(TAG, "set ttsLocale: %s with status %s", locale, status);
+    if (cacheTtsLocale && !isNotAvailableStatus(status)) {
+      cachedTtsLocale = locale;
+    }
+    return status;
+  }
+
+  /** Dumps the important variables for debugging. */
+  public void dump(Logger dumpLogger) {
+    dumpLogger.log(" cachedTtsLocale=%s", toLanguageTag(cachedTtsLocale));
+    dumpLogger.log(" mDefaultLocale=%s", toLanguageTag(mDefaultLocale));
+    dumpLogger.log(" mSystemLocale=%s", toLanguageTag(mSystemLocale));
+    dumpLogger.log(" mLastUtteranceLocale=%s", toLanguageTag(mLastUtteranceLocale));
+    dumpLogger.log(" getVoice=%s", getTtsVoice());
+  }
+
+  private String toLanguageTag(@Nullable Locale locale) {
+    return locale != null ? locale.toLanguageTag() : "null";
+  }
+
+  private @Nullable Voice getTtsVoice() {
+    return mTts != null ? mTts.getVoice() : null;
   }
 
   /**
@@ -873,33 +1047,34 @@ public class FailoverTextToSpeech {
    * Attempts to restore the user's preferred TTS locale, if set. Otherwise attempts to restore the
    * system locale.
    */
-  private void attemptRestorePreferredLocale() {
+  private @Nullable Locale attemptRestorePreferredLocale() {
     if (mTts == null) {
-      return;
+      return null;
     }
     mLastUtteranceLocale = null;
     final Locale preferredLocale = (mDefaultLocale != null ? mDefaultLocale : mSystemLocale);
     try {
-      final int status = mTts.setLanguage(preferredLocale);
+      final int status = setTtsLocale(preferredLocale);
       if (!isNotAvailableStatus(status)) {
         LogUtils.i(TAG, "Restored TTS locale to %s", preferredLocale);
-        return;
+        return preferredLocale;
       }
     } catch (Exception e) {
       LogUtils.e(TAG, "Failed to setLanguage(): %s", e.toString());
     }
 
     LogUtils.e(TAG, "Failed to restore TTS locale to %s", preferredLocale);
+    return null;
   }
 
   /** Handles updating the default locale. */
   private void updateDefaultLocale() {
     final String defaultLocale = TextToSpeechUtils.getDefaultLocaleForEngine(mResolver, mTtsEngine);
-    mDefaultLocale = (!TextUtils.isEmpty(defaultLocale)) ? new Locale(defaultLocale) : null;
+    mDefaultLocale = !TextUtils.isEmpty(defaultLocale) ? forLanguageTag(defaultLocale) : null;
 
     // The default locale changed, which may mean we can restore the user's
     // preferred locale.
-    ensureSupportedLocale();
+    localeInUse = ensureSupportedLocale();
   }
 
   /** Handles updating the system locale. */
@@ -913,7 +1088,7 @@ public class FailoverTextToSpeech {
 
     // The system locale changed, which may mean we need to override the
     // current TTS locale.
-    ensureSupportedLocale();
+    localeInUse = ensureSupportedLocale();
   }
 
   /** Registers the configuration change callback. */
@@ -966,12 +1141,12 @@ public class FailoverTextToSpeech {
    * @return {@code true} if the status indicates that the language is available.
    */
   private static boolean isNotAvailableStatus(int status) {
-    return (status != TextToSpeech.LANG_AVAILABLE)
-        && (status != TextToSpeech.LANG_COUNTRY_AVAILABLE)
-        && (status != TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE);
+    return (status != LANG_AVAILABLE)
+        && (status != LANG_COUNTRY_AVAILABLE)
+        && (status != LANG_COUNTRY_VAR_AVAILABLE);
   }
 
-  private final FailoverTextToSpeech.SpeechHandler mHandler = new SpeechHandler(this);
+  private final SpeechHandler mHandler = new SpeechHandler(this);
 
   /** Handles changes to the default TTS engine. */
   private final ContentObserver mSynthObserver =
@@ -1028,7 +1203,7 @@ public class FailoverTextToSpeech {
         }
 
         private void handleUtteranceCompleted(String utteranceId, boolean success) {
-          LogUtils.d(TAG, "Received callback for \"%s\"", utteranceId);
+          LogUtils.d(TAG, "Received callback for \"%s\", returned %b", utteranceId, success);
           if (mShouldHandleTtsCallbackInMainThread) {
             // Hand utterance completed processing to the main thread.
             mHandler.onUtteranceCompleted(utteranceId, success);
@@ -1042,11 +1217,10 @@ public class FailoverTextToSpeech {
           if (mShouldHandleTtsCallbackInMainThread) {
             mHandler.onUtteranceStarted(utteranceId);
           } else {
-            FailoverTextToSpeech.this.handleUtteranceStarted(utteranceId);
+            FailoverTextToSpeech.this.handleUtteranceStarted(utteranceId, /* delay= */ 0);
           }
         }
 
-        @TargetApi(Build.VERSION_CODES.N) // This callback will only be called on N+.
         @Override
         public void onAudioAvailable(String utteranceId, byte[] audio) {
           // onAudioAvailable() is usually called many times per utterance,
@@ -1054,7 +1228,6 @@ public class FailoverTextToSpeech {
           updatePerformanceMetrics(utteranceId);
         }
 
-        @TargetApi(Build.VERSION_CODES.O)
         @Override
         public void onRangeStart(String utteranceId, int start, int end, int frame) {
           if (mShouldHandleTtsCallbackInMainThread) {
@@ -1106,7 +1279,7 @@ public class FailoverTextToSpeech {
       };
 
   /** {@link BroadcastReceiver} for detecting media mount and unmount. */
-  private class MediaMountStateMonitor extends BroadcastReceiver {
+  private class MediaMountStateMonitor extends SameThreadBroadcastReceiver {
     private final IntentFilter mMediaIntentFilter;
 
     public MediaMountStateMonitor() {
@@ -1121,7 +1294,7 @@ public class FailoverTextToSpeech {
     }
 
     @Override
-    public void onReceive(Context context, Intent intent) {
+    public void onReceiveIntent(Intent intent) {
       final String action = intent.getAction();
 
       mHandler.onMediaStateChanged(action);
@@ -1157,7 +1330,8 @@ public class FailoverTextToSpeech {
           parent.handleTtsInitialized(msg.arg1);
           break;
         case MSG_UTTERANCE_STARTED:
-          parent.handleUtteranceStarted((String) msg.obj);
+          long talkbackDelay = SystemClock.uptimeMillis() - msg.getWhen();
+          parent.handleUtteranceStarted((String) msg.obj, talkbackDelay);
           break;
         case MSG_UTTERANCE_COMPLETED:
           Pair<String, Boolean> data = (Pair<String, Boolean>) msg.obj;
@@ -1197,18 +1371,31 @@ public class FailoverTextToSpeech {
 
   /** Listener for TTS events. */
   public interface FailoverTtsListener {
-    /*
-     * Called after the class has initialized with a tts engine.
-     */
-    void onTtsInitialized(boolean wasSwitchingEngines);
+    /** Called after the class has initialized with a tts engine. */
+    default void onTtsInitialized(boolean wasSwitchingEngines, String enginePackageName) {}
+
+    /** Called before an utterance is sent to the TTS engine. */
+    default void onBeforeUtteranceRequested(
+        String utteranceId, UtteranceInfoCombo utteranceInfoCombo) {}
 
     /*
      * Called before an utterance starts speaking.
      */
-    void onUtteranceStarted(String utteranceId);
+    default void onUtteranceStarted(String utteranceId) {}
+
+    /**
+     * Called before an utterance starts speaking.
+     *
+     * @param delay The time (in milliseconds) elapsed between {@link
+     *     UtteranceProgressListener#onStart(String)} invoked and the callback dispatched by {@link
+     *     SpeechHandler}.
+     */
+    default void onUtteranceStarted(String utteranceId, long delay) {
+      onUtteranceStarted(utteranceId);
+    }
 
     /*
-     * .Called before speaking the range of an utterance.
+     * Called before speaking the range of an utterance.
      */
     void onUtteranceRangeStarted(String utteranceId, int start, int end);
 
@@ -1216,5 +1403,50 @@ public class FailoverTextToSpeech {
      * Called after an utterance has completed speaking.
      */
     void onUtteranceCompleted(String utteranceId, boolean success);
+  }
+
+  /** Details of the utterance that is sent to the TTS engine. */
+  @AutoValue
+  public abstract static class UtteranceInfoCombo {
+    public abstract CharSequence text();
+
+    public abstract @Nullable Locale locale();
+
+    public abstract boolean isLocaleAttached();
+
+    public abstract boolean isSeparatorInUtterance();
+
+    public abstract boolean isAggressiveChunking();
+
+    public abstract boolean flushGlobalTtsQueue();
+
+    public static Builder builder(
+        CharSequence text, @Nullable Locale locale, boolean isLocaleAttached) {
+      return new AutoValue_FailoverTextToSpeech_UtteranceInfoCombo.Builder()
+          .setText(text)
+          .setLocale(locale)
+          .setIsLocaleAttached(isLocaleAttached)
+          .setIsSeparatorInUtterance(false)
+          .setIsAggressiveChunking(false)
+          .setFlushGlobalTtsQueue(true);
+    }
+
+    /** Builders of the utterance info combo. */
+    @AutoValue.Builder
+    public abstract static class Builder {
+      public abstract Builder setText(CharSequence text);
+
+      public abstract Builder setLocale(@Nullable Locale locale);
+
+      public abstract Builder setIsLocaleAttached(boolean value);
+
+      public abstract Builder setIsSeparatorInUtterance(boolean value);
+
+      public abstract Builder setIsAggressiveChunking(boolean value);
+
+      public abstract Builder setFlushGlobalTtsQueue(boolean value);
+
+      public abstract UtteranceInfoCombo build();
+    }
   }
 }

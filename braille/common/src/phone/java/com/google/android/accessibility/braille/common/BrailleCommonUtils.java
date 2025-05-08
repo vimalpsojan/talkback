@@ -1,15 +1,34 @@
+/*
+ * Copyright (C) 2023 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 package com.google.android.accessibility.braille.common;
 
-import static java.lang.Math.max;
-import static java.lang.Math.min;
-
+import android.content.ComponentName;
+import android.content.Context;
+import android.provider.Settings;
 import android.text.InputType;
+import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
-import android.util.Range;
+import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
+import com.google.android.accessibility.braille.interfaces.SelectionRange;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 
 /** Provides the utilities for common braille usages. */
 public class BrailleCommonUtils {
@@ -135,18 +154,17 @@ public class BrailleCommonUtils {
             || isTextPasswordField(editorInfo.inputType));
   }
 
-  /** Returns the range of selected text. */
-  public static Range<Integer> getTextSelectionRange(InputConnection inputConnection) {
-    ExtractedText extractedText =
-        inputConnection.getExtractedText(
-            new ExtractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR);
+  /** Returns the start and the end of selected text. */
+  public static SelectionRange getTextSelection(InputConnection inputConnection) {
+    ExtractedText extractedText = inputConnection.getExtractedText(new ExtractedTextRequest(), 0);
     int selectionStart = 0;
     int selectionEnd = 0;
     if (extractedText != null) {
-      selectionStart = min(extractedText.selectionStart, extractedText.selectionEnd);
-      selectionEnd = max(extractedText.selectionStart, extractedText.selectionEnd);
+      selectionStart =
+          extractedText.selectionStart > 0 ? extractedText.selectionStart : selectionStart;
+      selectionEnd = extractedText.selectionEnd > 0 ? extractedText.selectionEnd : selectionEnd;
     }
-    return new Range<>(selectionStart, selectionEnd);
+    return new SelectionRange(selectionStart, selectionEnd);
   }
 
   /**
@@ -162,6 +180,20 @@ public class BrailleCommonUtils {
     }
   }
 
+  /**
+   * Performs key action with specific key code.
+   *
+   * @return true if success; false if either action down or action up performs on invalid {@link
+   *     InputConnection}.
+   */
+  @CanIgnoreReturnValue
+  public static boolean performKeyAction(InputConnection inputConnection, int keyCode) {
+    if (inputConnection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keyCode))) {
+      return inputConnection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keyCode));
+    }
+    return false;
+  }
+
   private static boolean isNumberPasswordField(int inputType) {
     final int variation = inputType & InputType.TYPE_MASK_VARIATION;
     return getInputTypeClass(inputType) == InputType.TYPE_CLASS_NUMBER
@@ -174,6 +206,55 @@ public class BrailleCommonUtils {
         && (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD
             || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+  }
+
+  /** Returns {@code true} if {@code editorInfo}'s input type is visible password. */
+  public static boolean isVisiblePasswordField(EditorInfo editorInfo) {
+    final int variation = editorInfo.inputType & InputType.TYPE_MASK_VARIATION;
+    return isPasswordField(editorInfo)
+        && variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+  }
+
+  /** Determines from system settings if {@code imeComponentName} is an enabled input method. */
+  @SuppressWarnings("StringSplitter") // Guava not used in project, so Splitter not available.
+  public static boolean isInputMethodEnabled(Context contextArg, ComponentName imeComponentName) {
+    final String enabledIMEIds =
+        Settings.Secure.getString(
+            contextArg.getContentResolver(), Settings.Secure.ENABLED_INPUT_METHODS);
+    if (enabledIMEIds == null) {
+      return false;
+    }
+
+    for (String enabledIMEId : enabledIMEIds.split(":")) {
+      if (imeComponentName.equals(ComponentName.unflattenFromString(enabledIMEId))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Determines, from system settings, if {@code imeComponentName} is the default input method. */
+  public static boolean isInputMethodDefault(Context contextArg, ComponentName imeComponentName) {
+    final String defaultIMEId =
+        Settings.Secure.getString(
+            contextArg.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+
+    return defaultIMEId != null
+        && imeComponentName.equals(ComponentName.unflattenFromString(defaultIMEId));
+  }
+
+  /** Filters non-printing characters like \u202A and \u202C. */
+  public static CharSequence filterNonPrintCharacter(CharSequence text) {
+    if (TextUtils.isEmpty(text)) {
+      return "";
+    }
+    SpannableStringBuilder stringBuilder = new SpannableStringBuilder(text);
+    for (int i = text.length() - 1; i >= 0; i--) {
+      if (Character.isIdentifierIgnorable(stringBuilder.charAt(i))) {
+        stringBuilder.delete(i, i + 1);
+      }
+    }
+    return stringBuilder;
   }
 
   private static int getInputTypeClass(int inputType) {

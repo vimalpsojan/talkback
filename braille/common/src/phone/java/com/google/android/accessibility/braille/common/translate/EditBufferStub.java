@@ -58,18 +58,13 @@ public class EditBufferStub implements EditBuffer {
 
   @Override
   public void deleteCharacterBackward(ImeConnection imeConnection) {
-    imeConnection.inputConnection.sendKeyEvent(
-        new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
-    imeConnection.inputConnection.sendKeyEvent(
-        new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
+    BrailleCommonUtils.performKeyAction(imeConnection.inputConnection, KeyEvent.KEYCODE_DEL);
   }
 
   @Override
   public void deleteCharacterForward(ImeConnection imeConnection) {
-    imeConnection.inputConnection.sendKeyEvent(
-        new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL));
-    imeConnection.inputConnection.sendKeyEvent(
-        new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL));
+    BrailleCommonUtils.performKeyAction(
+        imeConnection.inputConnection, KeyEvent.KEYCODE_FORWARD_DEL);
   }
 
   @Override
@@ -96,22 +91,27 @@ public class EditBufferStub implements EditBuffer {
   }
 
   @Override
-  public boolean moveCursorForwardByLine(ImeConnection imeConnection) {
-    return true;
-  }
-
-  @Override
-  public boolean moveCursorBackwardByLine(ImeConnection imeConnection) {
-    return true;
-  }
-
-  @Override
   public boolean moveTextFieldCursor(ImeConnection imeConnection, int index) {
+    return true;
+  }
+
+  @Override
+  public boolean moveCursorToBeginning(ImeConnection imeConnection) {
+    return true;
+  }
+
+  @Override
+  public boolean moveCursorToEnd(ImeConnection imeConnection) {
     return true;
   }
 
   @Override
   public HoldingsInfo getHoldingsInfo(ImeConnection imeConnection) {
     return null;
+  }
+
+  @Override
+  public boolean selectAllText(ImeConnection imeConnection) {
+    return false;
   }
 }

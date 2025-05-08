@@ -13,26 +13,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.google.android.accessibility.braille.interfaces;
 
 /** Allows BrailleDisplay to signal to BrailleIme. */
 public interface BrailleImeForBrailleDisplay {
   /** The result of actions. */
-  public enum Result {
+  enum Result {
     SUCCESS,
     REACH_EDGE,
     INVALID_INPUT_CONNECTION,
   }
 
   /** Tells BrailleIme to move the cursor of the editing text forward. */
-  default Result moveCursorForward() {
-    return Result.SUCCESS;
-  }
+  boolean moveCursorForward();
 
   /** Tells BrailleIme to move the cursor of the editing text backward. */
-  default Result moveCursorBackward() {
-    return Result.SUCCESS;
-  }
+  boolean moveCursorBackward();
+
+  /** Tells BrailleIme to move the cursor of the editing text forward by word. */
+  boolean moveCursorForwardByWord();
+
+  /** Tells BrailleIme to move the cursor of the editing text backward by word. */
+  boolean moveCursorBackwardByWord();
+
+  /** Tells BrailleIme to move the cursor of the editing text forward by line. */
+  boolean moveCursorForwardByLine();
+
+  /** Tells BrailleIme to move the cursor of the editing text backward by line. */
+  boolean moveCursorBackwardByLine();
 
   /** When a physical braille display is connected, informs BrailleIme. */
   void onBrailleDisplayConnected();
@@ -43,33 +52,81 @@ public interface BrailleImeForBrailleDisplay {
   /** Sends the input from a physical braille display to BrailleIme. */
   boolean sendBrailleDots(BrailleCharacter dots);
 
-  /** Tells BrailleIme to move the cursor of the editing text forward by line. */
-  boolean moveCursorForwardByLine();
-
-  /** Tells BrailleIme to move the cursor of the editing text backward by line. */
-  boolean moveCursorBackwardByLine();
-
   /** Tells BrailleIme to move the cursor in the text field to a specified position. */
   boolean moveTextFieldCursor(int toIndex);
 
   /** Tells BrailleIme to move the cursor of holdings to a specified position. */
   boolean moveHoldingsCursor(int toIndex);
 
+  /** Tells BrailleIme to move the cursor to the beginning of the text field. */
+  boolean moveCursorToBeginning();
+
+  /** Tells BrailleIme to move the cursor to the end of the text field. */
+  boolean moveCursorToEnd();
+
   /** Tells BrailleIme to delete the editing text before cursor. */
   boolean deleteBackward();
 
-  /** Tells BrailleIme to delete the editing text after cursor. */
-  boolean deleteForward();
+  /** Tells BrailleIme to delete the editing word before cursor. */
+  boolean deleteWordBackward();
 
-  /** Commits the holdings and perform editor's default action. */
-  boolean submit();
+  /** Tells BrailleIme to cut selected text. */
+  boolean cutSelectedText();
 
-  /** Performs enter key action. */
-  boolean performEnterKeyAction();
+  /** Tells BrailleIme to copy selected text. */
+  boolean copySelectedText();
+
+  /** Tells BrailleIme to paste selected text. */
+  boolean pasteSelectedText();
+
+  /** Tells BrailleIme to select all text. */
+  boolean selectAllText();
+
+  /** Tells BrailleIme to select from current cursor to start of text field. */
+  boolean selectCurrentToStart();
+
+  /** Tells BrailleIme to select from current cursor to end of text field. */
+  boolean selectCurrentToEnd();
+
+  /** Tells BrailleIme to select previous character. */
+  boolean selectPreviousCharacter();
+
+  /** Tells BrailleIme to select next character. */
+  boolean selectNextCharacter();
+
+  /** Tells BrailleIme to select previous word. */
+  boolean selectPreviousWord();
+
+  /** Tells BrailleIme to select next word. */
+  boolean selectNextWord();
+
+  /** Tells BrailleIme to select previous line. */
+  boolean selectPreviousLine();
+
+  /** Tells BrailleIme to select next line. */
+  boolean selectNextLine();
+
+  /** Tells BrailleIme commit holdings to the editor. */
+  void commitHoldings();
+
+  /** Tells BrailleIme commit holdings to the editor and perform editor's default action. */
+  boolean commitHoldingsAndPerformEditorAction();
+
+  /** Tells BrailleIme commit holdings to the editor and performs enter key action. */
+  boolean commitHoldingsAndPerformEnterKeyAction();
+
+  /** Switches to next input method. */
+  boolean switchToNextInputMethod();
 
   /** Tells BrailleIme to hide itself. */
   void hideKeyboard();
 
   /** Tells BrailleIme to update result. */
   void updateResultForDisplay();
+
+  /** Returns whether braille keyboard is activated. */
+  boolean isBrailleKeyboardActivated();
+
+  /** Handles keycode entered from braille display for BARD Mobile. */
+  boolean handleBrailleKeyForBARDMobile(int keyCode);
 }

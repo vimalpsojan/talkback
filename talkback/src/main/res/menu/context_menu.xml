@@ -54,7 +54,7 @@
       android:orderInCategory="23"
       android:title="@string/tts_preferences_title" />
   <item
-      android:id="@+id/pause_feedback"
-      android:orderInCategory="24"
-      android:title="@string/shortcut_pause_feedback" />
+      android:id="@+id/braille_display_settings"
+      android:orderInCategory="25"
+      android:title="@string/title_show_braille_display_settings" />
 </menu>

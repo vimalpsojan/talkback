@@ -22,7 +22,6 @@ import android.Manifest;
 import android.animation.ArgbEvaluator;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.graphics.Paint;
@@ -32,9 +31,9 @@ import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
-import android.os.Bundle;
 import android.text.Spannable;
 import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
@@ -47,10 +46,12 @@ import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 import androidx.annotation.ColorInt;
 import androidx.core.content.ContextCompat;
 import com.google.android.accessibility.braille.common.BrailleUserPreferences;
-import java.util.Locale;
+import com.google.android.accessibility.braille.common.ImeConnection;
 import java.util.Optional;
 
 /** Static convenience methods for Braille Keyboard. */
@@ -128,7 +129,7 @@ public class Utils {
   /**
    * Returns {@code true} if the absolute values of the given coordinates have a large enough ratio
    * that the 2-D vector formed from them is nearly cardinal, where "nearly cardinal" is defined as
-   * any ratio that is greather than or equal to {@code ratioThreshold}.
+   * any ratio that is greater than or equal to {@code ratioThreshold}.
    *
    * <p>If either (but not both) of the coordinates are {@code 0}, then true is returned.
    *
@@ -154,18 +155,24 @@ public class Utils {
     return "robolectric".equals(Build.FINGERPRINT);
   }
 
-  /** Formats {@param substring} as {@param drawable}. Returns true if success; otherwise false. */
-  public static boolean formatSubstringAsDrawable(
+  /** Formats {@code substring} as {@code drawable}. */
+  public static SpannableString formatSubstringAsDrawable(
       SpannableString spannableString, String substring, Drawable drawable) {
+    String token = " ";
     int indexIconStart = spannableString.toString().indexOf(substring);
     int indexIconEnd = indexIconStart + substring.length();
     if (indexIconStart == -1) {
-      return false;
+      return spannableString;
     }
+    SpannableStringBuilder spannableStringBuilder = new SpannableStringBuilder(spannableString);
+    spannableStringBuilder.replace(indexIconStart, indexIconEnd, token);
     drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
-    spannableString.setSpan(
-        new ImageSpan(drawable), indexIconStart, indexIconEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-    return true;
+    spannableStringBuilder.setSpan(
+        new ImageSpan(drawable),
+        indexIconStart,
+        indexIconStart + token.length(),
+        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+    return SpannableString.valueOf(spannableStringBuilder);
   }
 
   /** Formats {@param substring} as {@code url} link. Returns true if success; otherwise false. */
@@ -201,20 +208,6 @@ public class Utils {
     } catch (RuntimeException e) {
       return Optional.empty();
     }
-  }
-
-  /**
-   * Attaches a Settings Highlight description {@link Bundle} with the given {@link Intent}.
-   *
-   * <p>Only works on Pixel devices; has no effect on other devices.
-   *
-   * <p>For more information, see
-   * https://docs.google.com/document/d/1LnnoitwKYd-dNxQ7HE9PRynBp_vLa2aT-s-3D4VD8u4
-   */
-  public static void attachSettingsHighlightBundle(Intent intent, ComponentName componentName) {
-    Bundle bundle = new Bundle();
-    bundle.putString(":settings:fragment_args_key", componentName.flattenToString());
-    intent.putExtra(":settings:show_fragment_args", bundle);
   }
 
   /**
@@ -314,8 +307,7 @@ public class Utils {
    * is enabled.
    */
   public static boolean isNavigationBarLeftLocated(Context context) {
-    return Build.VERSION.SDK_INT > Build.VERSION_CODES.N
-        && !isFullGesturalNavigationEnabled(context)
+    return !isFullGesturalNavigationEnabled(context)
         && getDisplayRotationDegrees(context) == Surface.ROTATION_270;
   }
 
@@ -326,21 +318,6 @@ public class Utils {
     return resId > 0 && resources.getInteger(resId) == NAV_BAR_MODE_GESTURAL;
   }
 
-  /**
-   * Capitalize the first letter of a string. Supports Unicode.
-   *
-   * @param str The input {@link String} for which to capitalize the first letter
-   * @return The input {@link String} with the first letter capitalized
-   */
-  public static String capitalizeFirstLetter(String str) {
-    if (TextUtils.isEmpty(str)) {
-      return str;
-    }
-    return Character.isUpperCase(str.charAt(0))
-        ? str
-        : str.substring(0, 1).toUpperCase(Locale.getDefault()) + str.substring(1);
-  }
-
   /** Returns the braille keyboard display name. */
   public static String getBrailleKeyboardDisplayName(Context context) {
     String name;
@@ -349,8 +326,7 @@ public class Utils {
     } else {
       String codeUserFacingName =
           BrailleUserPreferences.readCurrentActiveInputCodeAndCorrect(context)
-              .getUserFacingName(context.getResources())
-              .toString();
+              .getUserFacingName(context);
       name =
           context.getString(
               R.string.multiple_languages_braille_ime_displayed_name, codeUserFacingName);
@@ -383,8 +359,18 @@ public class Utils {
   }
 
   /** Returns hint of the edit field. */
-  public static CharSequence getHint(EditorInfo editorInfo) {
-    CharSequence hint = editorInfo.hintText;
-    return hint == null ? "" : hint;
+  public static CharSequence getHint(ImeConnection imeConnection) {
+    CharSequence hint = imeConnection.editorInfo.hintText;
+    if (!TextUtils.isEmpty(hint)) {
+      return hint;
+    }
+    ExtractedText extractedText =
+        imeConnection.inputConnection.getExtractedText(new ExtractedTextRequest(), 0);
+    if (extractedText != null
+        && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        && !TextUtils.isEmpty(extractedText.hint)) {
+      return extractedText.hint;
+    }
+    return "";
   }
 }

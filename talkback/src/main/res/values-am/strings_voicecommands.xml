@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="voice_commands_read">ንባብ</string>
-  <string name="voice_commands_read_from_next">ከቀጣዩ ያንብቡ</string>
+  <string name="voice_commands_read_from_next">ከጠቋሚ አንብብ</string>
   <string name="voice_commands_edit_options">የአርትዕ ማድረጊያ አማራጮች</string>
-  <string name="voice_commands_text_editing">የጽሑፍ አርትዖት</string>
-  <string name="voice_commands_edit_text">ጽሑፍ ያርትዑ</string>
-  <string name="voice_commands_editing_options">የአርትዖት አማራጮች</string>
   <string name="voice_commands_edit">አርትዕ ያድርጉ</string>
   <string name="voice_commands_what">ምን</string>
   <string name="voice_commands_say">ይበሉ</string>
@@ -18,9 +15,9 @@
   <string name="voice_commands_quick_setting">ፈጣን ቅንብር</string>
   <string name="voice_commands_dim">ደብዛዛ ብርሃን</string>
   <string name="voice_commands_darken">አጥቁር</string>
-  <string name="voice_commands_brighten_screen">ብሩህ የሆነ ማያ ገጽ</string>
+  <string name="voice_commands_brighten_screen">ብሩህ የሆነ ማያ ገፅ</string>
   <string name="voice_commands_restore_screen">ማያ ገጽን እነበረበት መልስ</string>
-  <string name="voice_commands_cancel_hide_screen">ማያ ገጽ ደብቅን ሰርዝ</string>
+  <string name="voice_commands_cancel_hide_screen">ማያ ገፅ ደብቅን ሰርዝ</string>
   <string name="voice_commands_all_apps">ሁሉም መተግበሪያዎች</string>
   <string name="voice_commands_apps">መተግበሪያዎች</string>
   <string name="voice_commands_overview">ማጠቃለያ</string>
@@ -46,7 +43,6 @@
   <string name="voice_commands_label">መሰየሚያ</string>
   <string name="voice_commands_cannot_label_feedback">መሰየሚያን መስጠት አይቻልም</string>
   <string name="voice_commands_assistant">ረዳት</string>
-  <string name="voice_commands_setting_speech_rate">የንግግር ፍጥነትን በማቀናበር ላይ</string>
   <string name="voice_commands_first">መጀመሪያ</string>
   <string name="voice_commands_top">ከላይ</string>
   <string name="voice_commands_last">መጨረሻ</string>
@@ -58,7 +54,7 @@
   <string name="voice_commands_Spell">ድግምት</string>
   <string name="voice_commands_talkback_settings">የTalkBack ቅንብሮች</string>
   <string name="voice_commands_talkback_setting">የTalkBack ቅንብር</string>
-  <string name="voice_commands_screen_search">የማያ ገጽ ፍለጋ</string>
+  <string name="voice_commands_screen_search">የማያ ገፅ ፍለጋ</string>
   <string name="voice_commands_search_on_screen">ማያ ገጹ ላይ ይፈልጉ</string>
   <string name="voice_commands_copy">@android:string/copy</string>
   <string name="voice_commands_cut">@android:string/cut</string>
@@ -79,7 +75,7 @@
   <string name="voice_commands_desktop">ዴስክቶፕ</string>
   <string name="voice_commands_stop">መቆሚያ</string>
   <string name="voice_commands_quit">አቁም</string>
-  <string name="voice_commands_quiet">ጸጥታ</string>
+  <string name="voice_commands_quiet">ፀጥታ</string>
   <string name="voice_commands_pause">ላፍታ አቁም</string>
   <string name="voice_commands_nevermind">በቃ ተወው</string>
   <string name="voice_commands_shut_up">ዝም በል</string>
@@ -87,7 +83,6 @@
   <string name="voice_commands_increase_speech_rate">የንግግር ፍጥነትን ይጨምሩ</string>
   <string name="voice_commands_slower">ዝግ ያለ</string>
   <string name="voice_commands_decrease_speech_rate">የንግግር ፍጥነትን ይቀንሱ</string>
-  <string name="voice_commands_possible_options_title">እንዲህ ማለት ይችላሉ</string>
   <string name="voice_commands_no_action">የድምጽ አቋራጭ አይደገፍም</string>
   <string name="voice_commands_no_mic_permissions">ይህን ባህሪ ለመጠቀም፣ ማይክራፎኑን ለመጠቀም ፈቃድ መስጠት አለብዎት</string>
   <string name="voice_commands_no_voice_recognition_ability">ይቅርታ! ይህ ባህሪ በእርስዎ መሣሪያ ላይ አይገኝም</string>
@@ -102,12 +97,13 @@
   <string name="voice_commands_no_next_link_feedback">ምንም ቀጣይ አገናኝ የለም</string>
   <string name="voice_commands_no_next_control_feedback">ምንም ቀጣይ መቆጣጠሪያ የለም</string>
   <string name="voice_commands_no_next_landmark_feedback">ምንም ቀጣይ የመሬት ምልክት የለም</string>
-  <string name="voice_commands_help_title">የየድምጽ ትዕዛዝ አጠቃላይ እይታ</string>
-  <string name="voice_commands_help_description">የድምጽ ትዕዛዞችን ለመጠቀም፣ ወደ ቀኝ ከዚያ ወደ ላይ ያንሸራትቱ። ለዚህ የትዕዛዞች ዝርዝር «እገዛ» ወይም «ምን ማለት እችላለሁ» በማንኛውም ጊዜ ይበሉ።</string>
+  <string name="voice_commands_help_title">የየድምጽ ትዕዛዝ አጠቃላይ ዕይታ</string>
+  <string name="voice_commands_help_description">የድምፅ ትዕዛዞችን ለመጠቀም፣ ወደ ቀኝ ከዚያ ወደ ላይ ያንሸራትቱ። ለዚህ የትዕዛዞች ዝርዝር «%1$s» ወይም «ምን ማለት እችላለሁ» በማንኛውም ጊዜ ይበሉ።</string>
   <string name="voice_commands_help_hint">ለተሻሉ ውጤቶች በሚቀጥሉት ማያ ገጾች ላይ የተዘረዘሩትን ትክክለኛ ቃላት ይበሉ።</string>
   <string name="voice_command_screen_locked_hint">ማያ ገጹ በሚቆለፍበት ጊዜ የድምጽ ትዕዛዞች አይገኙም። በምትኩ የTalkBack ምናሌን ለመጠቀም %1$s።</string>
+  <string name="voice_commands_during_setup_hint">በውቅረት ጊዜ የድምፅ ትዕዛዞች አይገኙም።</string>
   <string name="voice_commands_help_reading_controls_title">@string/shortcut_title_reading_control</string>
-  <string name="voice_commands_help_reading_controls_description">አሁን ባለው ማያ ገጽ ላይ ይዘትን እንዴት እንደሚያነቡ ይቀይሩ</string>
+  <string name="voice_commands_help_reading_controls_description">አሁን ባለው ማያ ገፅ ላይ ይዘትን እንዴት እንደሚያነቡ ይቀይሩ</string>
   <string name="voice_commands_help_next">ቀጣይ [ርዕስ]</string>
   <string name="voice_commands_help_navigation">[ቃል] ዳሰሳ</string>
   <string name="voice_commands_help_speech_rate">ይናገሩ [በፍጥነት]</string>
@@ -116,15 +112,15 @@
   <string name="voice_commands_help_navigation_description">በቃላት፣ በቁምፊዎች፣ በመስመሮች፣ በአንቀጾች፣ በአርእስቶች፣ በቁጥጥሮች እና ሌሎችም ይዳስሱ</string>
   <string name="voice_commands_help_speech_rate_description">እንዲሁም «ቀስ ብለው ይናገሩ» ማለት ይችላሉ</string>
   <string name="voice_commands_help_verbosity_description">ወደ ዝቅተኛ፣ ከፍተኛ ወይም ብጁ ይለውጡ</string>
-  <string name="voice_commands_help_first_description">አሁን ባለው ማያ ገጽ ላይ ወደ መጀመሪያው ንጥል ይሂዱ</string>
-  <string name="voice_commands_help_last_description">አሁን ባለው ማያ ገጽ ላይ ወዳለው የመጨረሻው ንጥል ይሂዱ</string>
+  <string name="voice_commands_help_first_description">አሁን ባለው ማያ ገፅ ላይ ወደ መጀመሪያው ንጥል ይሂዱ</string>
+  <string name="voice_commands_help_last_description">አሁን ባለው ማያ ገፅ ላይ ወዳለው የመጨረሻው ንጥል ይሂዱ</string>
   <string name="voice_commands_help_languages_description">የንግግር ቋንቋዎን ይቀይሩ (ከጽሑፍ ወደ ንግግር)</string>
   <string name="voice_commands_help_find_items_title">ንጥሎችን ያግኙ</string>
-  <string name="voice_commands_help_find_items_description">አሁን ባለው ማያ ገጽ ላይ የተወሰነ ይዘትን ያግኙ</string>
+  <string name="voice_commands_help_find_items_description">አሁን ባለው ማያ ገፅ ላይ የተወሰነ ይዘትን ያግኙ</string>
   <string name="voice_commands_help_find_text">ያግኙ [አስቀምጥ]</string>
-  <string name="voice_commands_help_find_text_description">አሁን ባለው ማያ ገጽ ላይ ድሑፍን «አስቀምጥ» የሚለውን የሚያካትት የመጀመሪያውን ንጥል ያግኙ</string>
+  <string name="voice_commands_help_find_text_description">አሁን ባለው ማያ ገፅ ላይ ድሑፍን «አስቀምጥ» የሚለውን የሚያካትት የመጀመሪያውን ንጥል ያግኙ</string>
   <string name="voice_commands_help_find_description">ጽሑፍን «አስቀምጥ» የሚለውን ወደ የሚያካትት ቀጣይ ንጥል ለመሄድ «አግኝ» ድገም</string>
-  <string name="voice_commands_help_screen_search_description">ይህን ጽሑፍ በማያ ገጹ ላይ ለማግኘት የፍለጋ ቃል ያስገቡ</string>
+  <string name="voice_commands_help_screen_search_description">ይህን ጽሁፍ በማያ ገጹ ላይ ለማግኘት የፍለጋ ቃል ያስገቡ</string>
   <string name="voice_commands_help_text_editing_description">ድሑፍን ይጽፉ፣ ይምረጡት እና ይቅዱ</string>
   <string name="voice_commands_help_type_text">ዓይነት [እሺ]</string>
   <string name="voice_commands_help_copy_description">ከመቅዳትዎ በፊት ጽሑፍን ይምረጡ</string>

@@ -16,7 +16,13 @@
 
 package com.google.android.accessibility.talkback;
 
+import android.view.accessibility.AccessibilityEvent;
 import com.google.android.accessibility.talkback.Pipeline.InterpretationReceiver;
+import com.google.android.accessibility.talkback.monitor.BatteryMonitor;
+import com.google.android.accessibility.talkback.monitor.CallStateMonitor;
+import com.google.android.accessibility.utils.monitor.CollectionState;
+import com.google.android.accessibility.utils.monitor.SpeechStateMonitor;
+import com.google.android.accessibility.utils.monitor.TouchMonitor;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 /**
@@ -46,16 +52,46 @@ public class Monitors {
 
   private final BatteryMonitor batteryMonitor;
   private final CallStateMonitor callMonitor;
+  private final @NonNull TouchMonitor touchMonitor;
+  private final SpeechStateMonitor speechStateMonitor;
+  private final CollectionState collectionState;
+
+  private final int eventTypeMask; // Union of all monitor masks
 
   ////////////////////////////////////////////////////////////////////////////////////////////////
   // Construction
 
-  public Monitors(BatteryMonitor batteryMonitor, CallStateMonitor callMonitor) {
+  public Monitors(
+      BatteryMonitor batteryMonitor,
+      CallStateMonitor callMonitor,
+      @NonNull TouchMonitor touchMonitor,
+      SpeechStateMonitor speechStateMonitor,
+      CollectionState collectionState) {
     this.batteryMonitor = batteryMonitor;
     this.callMonitor = callMonitor;
+    this.touchMonitor = touchMonitor;
+    this.speechStateMonitor = speechStateMonitor;
+    this.collectionState = collectionState;
+
+    eventTypeMask =
+        touchMonitor.getEventTypes()
+            | speechStateMonitor.getEventTypes()
+            | collectionState.getEventTypes();
   }
 
   public void setPipelineInterpretationReceiver(@NonNull InterpretationReceiver pipeline) {
     batteryMonitor.setPipeline(pipeline);
+  }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////
+  // Methods
+  public int getEventTypes() {
+    return eventTypeMask;
+  }
+
+  public void onAccessibilityEvent(@NonNull AccessibilityEvent event) {
+    collectionState.onAccessibilityEvent(event);
+    touchMonitor.onAccessibilityEvent(event);
+    speechStateMonitor.onAccessibilityEvent(event);
   }
 }

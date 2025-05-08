@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2023 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 package com.google.android.accessibility.brailleime.input;
 
 import android.content.Context;
@@ -5,7 +21,9 @@ import android.content.res.Configuration;
 import android.graphics.PointF;
 import android.util.Size;
 import com.google.android.accessibility.braille.common.BrailleUserPreferences;
+import com.google.android.accessibility.braille.interfaces.BrailleCharacter;
 import com.google.android.accessibility.brailleime.BrailleImeLog;
+import com.google.android.accessibility.brailleime.BrailleInputOptions;
 import com.google.android.accessibility.brailleime.input.MultitouchHandler.HoldRecognizer;
 import java.text.ParseException;
 import java.util.ArrayList;
@@ -13,6 +31,7 @@ import java.util.List;
 
 /** {@link BrailleInputPlane} for tablet. */
 public class BrailleInputPlaneTablet extends BrailleInputPlane {
+  private static final String TAG = "BrailleInputPlaneTablet";
 
   /**
    * Constructs a BrailleInputPlane.
@@ -23,11 +42,32 @@ public class BrailleInputPlaneTablet extends BrailleInputPlane {
   BrailleInputPlaneTablet(
       Context context,
       Size sizeInPixels,
-      int orientation,
-      boolean reverseDots,
       HoldRecognizer holdRecognizer,
-      boolean isTutorial) {
-    super(context, sizeInPixels, orientation, reverseDots, holdRecognizer, isTutorial);
+      int orientation,
+      BrailleInputOptions options,
+      CustomOnGestureListener customGestureDetector) {
+    super(context, sizeInPixels, holdRecognizer, orientation, options, customGestureDetector);
+  }
+
+  @Override
+  List<PointF> readLayoutPoints(Size screenSize) {
+    try {
+      return BrailleUserPreferences.readCalibrationPointsTablet(
+          context, isTableTopMode, orientation);
+    } catch (ParseException e) {
+      BrailleImeLog.e(TAG, "Read saved dots failed.", e);
+      return new ArrayList<>();
+    }
+  }
+
+  @Override
+  void writeLayoutPoints(List<PointF> centerPoints, Size screenSize) {
+    try {
+      BrailleUserPreferences.writeCalibrationPointsTablet(
+          context, isTableTopMode, orientation, centerPoints, screenSize);
+    } catch (ParseException e) {
+      BrailleImeLog.e(TAG, "Write points failed.");
+    }
   }
 
   @Override
@@ -40,13 +80,7 @@ public class BrailleInputPlaneTablet extends BrailleInputPlane {
   @Override
   void sortDotCentersFirstTime(List<PointF> dotCenters) {
     dotCenters.sort(
-        (o1, o2) -> {
-          if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            return Float.compare(o1.x, o2.x);
-          } else {
-            return Float.compare(o1.x, o2.x);
-          }
-        });
+        (o1, o2) -> isTableTopMode ? Float.compare(o1.x, o2.x) : Float.compare(o2.x, o1.x));
   }
 
   @Override
@@ -55,17 +89,17 @@ public class BrailleInputPlaneTablet extends BrailleInputPlane {
         (o1, o2) -> {
           int result;
           if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            result = Float.compare(o1.x, o2.x);
+            result = isTableTopMode ? Float.compare(o1.x, o2.x) : Float.compare(o1.y, o2.y);
             if (result != 0) {
               return result;
             }
             if (isTableTopMode) {
               result = isFirstGroup ? Float.compare(o1.y, o2.y) : Float.compare(o2.y, o1.y);
             } else {
-              result = Float.compare(o2.y, o1.y);
+              result = isFirstGroup ? Float.compare(o1.x, o2.x) : Float.compare(o2.y, o1.y);
             }
           } else {
-            result = Float.compare(o1.x, o2.x);
+            result = isTableTopMode ? Float.compare(o1.x, o2.x) : Float.compare(o1.y, o2.y);
             if (result != 0) {
               return result;
             }
@@ -81,7 +115,14 @@ public class BrailleInputPlaneTablet extends BrailleInputPlane {
 
   @Override
   BrailleInputPlaneResult createSwipe(Swipe swipe) {
-    return BrailleInputPlaneResult.createSwipeForTablet(swipe);
+    return BrailleInputPlaneResult.createSwipe(getReorientedSwipe(swipe));
+  }
+
+  @Override
+  BrailleInputPlaneResult createDotHoldAndSwipe(
+      Swipe swipe, BrailleCharacter heldBrailleCharacter) {
+    return BrailleInputPlaneResult.createDotHoldAndDotSwipe(
+        getReorientedSwipe(swipe), heldBrailleCharacter);
   }
 
   @Override
@@ -107,23 +148,7 @@ public class BrailleInputPlaneTablet extends BrailleInputPlane {
     return screenSize;
   }
 
-  @Override
-  List<PointF> readLayoutPoints(Size screenSize) {
-    try {
-      return BrailleUserPreferences.readCalibrationPointsTablet(context, orientation);
-    } catch (ParseException e) {
-      BrailleImeLog.logE(TAG, "Read saved dots failed.", e);
-      return new ArrayList<>();
-    }
-  }
-
-  @Override
-  void writeLayoutPoints(List<PointF> centerPoints, Size screenSize) {
-    try {
-      BrailleUserPreferences.writeCalibrationPointsTablet(
-          context, orientation, centerPoints, screenSize);
-    } catch (ParseException e) {
-      BrailleImeLog.logE(TAG, "Write points failed.");
-    }
+  private Swipe getReorientedSwipe(Swipe swipe) {
+    return isTableTopMode ? Swipe.createFromMirror(swipe) : new Swipe(swipe);
   }
 }

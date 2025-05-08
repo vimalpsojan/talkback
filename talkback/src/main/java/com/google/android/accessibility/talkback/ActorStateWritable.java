@@ -26,10 +26,10 @@ import com.google.android.accessibility.talkback.actor.LanguageActor;
 import com.google.android.accessibility.talkback.actor.NodeActionPerformer;
 import com.google.android.accessibility.talkback.actor.PassThroughModeActor;
 import com.google.android.accessibility.talkback.actor.SpeechRateActor;
+import com.google.android.accessibility.talkback.actor.gemini.GeminiActor;
 import com.google.android.accessibility.talkback.focusmanagement.record.AccessibilityFocusActionHistory;
-import com.google.android.accessibility.talkback.labeling.CustomLabelManager;
-import com.google.android.accessibility.utils.AccessibilityNodeInfoUtils;
 import com.google.android.accessibility.utils.StringBuilderUtils;
+import com.google.android.accessibility.utils.labeling.LabelManager;
 import com.google.android.accessibility.utils.output.SpeechControllerImpl;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -84,6 +84,9 @@ public class ActorStateWritable {
    */
   private long overrideFocusRestoreUptimeMs = 0;
 
+  /** Last performed system action ID. */
+  private int lastSystemAction = 0;
+
   /** Read-only on-demand data-puller for scroll state data. */
   public final AutoScrollActor.StateReader scrollState;
 
@@ -103,7 +106,10 @@ public class ActorStateWritable {
   public final PassThroughModeActor.State passThroughModeState;
 
   /** Read-only on-demand data-puller for CustomLabelManager state data. */
-  public final CustomLabelManager.State labelerState;
+  public final LabelManager.State labelerState;
+
+  /** Read-only on-demand data-reader for Gemini state data. */
+  public final GeminiActor.State geminiState;
 
   //////////////////////////////////////////////////////////////////////////
   // Construction methods
@@ -119,7 +125,8 @@ public class ActorStateWritable {
       LanguageActor.State languageState,
       SpeechRateActor.State speechRateState,
       PassThroughModeActor.State passThroughModeState,
-      CustomLabelManager.State labelerState) {
+      LabelManager.State labelerState,
+      GeminiActor.State geminiState) {
     this.dimScreen = dimScreen;
     this.speechState = speechState;
     this.continuousRead = continuousRead;
@@ -131,6 +138,7 @@ public class ActorStateWritable {
     this.speechRateState = speechRateState;
     this.passThroughModeState = passThroughModeState;
     this.labelerState = labelerState;
+    this.geminiState = geminiState;
   }
 
   //////////////////////////////////////////////////////////////////////////
@@ -140,8 +148,7 @@ public class ActorStateWritable {
   public void setInputFocus(AccessibilityNodeInfoCompat node, long currentTime) {
     lastWindowId = node.getWindowId();
     lastWindowIdUptimeMs = currentTime;
-    inputFocusActionRecord =
-        new InputFocusActionRecord(AccessibilityNodeInfoUtils.obtain(node), currentTime);
+    inputFocusActionRecord = new InputFocusActionRecord(node, currentTime);
   }
 
   /** Returns nearly immutable focus data-structure. */
@@ -165,6 +172,14 @@ public class ActorStateWritable {
     return overrideFocusRestoreUptimeMs;
   }
 
+  public int getLastSystemAction() {
+    return lastSystemAction;
+  }
+
+  public void setLastSystemAction(int action) {
+    lastSystemAction = action;
+  }
+
   //////////////////////////////////////////////////////////////////////////
   // Display methods
 
@@ -180,7 +195,7 @@ public class ActorStateWritable {
         StringBuilderUtils.optionalSubObj("inputFocusActionRecord", inputFocusActionRecord),
         StringBuilderUtils.optionalInt(
             "overrideFocusRestoreUptimeMs", overrideFocusRestoreUptimeMs, 0),
-        StringBuilderUtils.optionalSubObj("scrollState", scrollState.getAutoScrollRecord()),
+        StringBuilderUtils.optionalSubObj("scrollState", scrollState.get()),
         StringBuilderUtils.optionalTag(
             "isSelectionModeActive", directionNavigation.isSelectionModeActive()),
         StringBuilderUtils.optionalField(
@@ -189,6 +204,8 @@ public class ActorStateWritable {
         StringBuilderUtils.optionalInt(
             "speechRatePercent", speechRateState.getSpeechRatePercentage(), 100),
         StringBuilderUtils.optionalTag(
-            "passThroughModeState", passThroughModeState.isPassThroughModeActive()));
+            "passThroughModeState", passThroughModeState.isPassThroughModeActive()),
+        StringBuilderUtils.optionalTag("hasAiCore", geminiState.hasAiCore()),
+        StringBuilderUtils.optionalTag("isAiFeatureAvailable", geminiState.isAiFeatureAvailable()));
   }
 }

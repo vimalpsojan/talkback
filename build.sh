@@ -2,13 +2,22 @@
 ###
 ### The following environment variables must be set before executing this script
 ###   ANDROID_SDK           # path to local copy of Android SDK
-###   ANDROID_NDK           # path to local copy of Android NDK
-###   JAVA_HOME             # path to local copy of Java SDK. Should be Java 8.
-# On gLinux, use 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64'
+###   JAVA_HOME             # path to local copy of Java SDK.
 
+### Environment variables:
+#   ANDROID_SDK=~/Android/Sdk
+#   ANDROID_NDK=~/Android/Sdk/ndk
+# The latest JDK,
+#   JAVA_HOME=/usr/local/buildtools/java/jdk
+# JDK 17, work for current build,
+#   JAVA_HOME=/google/data/ro/projects/java-platform/linux-amd64/jdk-17-latest/bin
 
-GRADLE_DOWNLOAD_VERSION=5.4.1
-GRADLE_TRACE=false   # change to true to enable verbose logging of gradlew
+# For help in getting the correct version numbers of gradle, the gradle plugin,
+# and Java, see the following:
+# https://developer.android.com/build/releases/gradle-plugin#updating-gradle
+# https://docs.gradle.org/current/userguide/compatibility.html
+GRADLE_DOWNLOAD_VERSION=7.6.4
+GRADLE_TRACE=false   # change to true to enable verbose logging of gradle
 
 
 function log {
@@ -24,99 +33,78 @@ function fail_with_message  {
   exit 1
 }
 
+function require_environment_variable() {
+  if [[ -z ${!1+set} ]]; then
+    fail_with_message "the environment variable $1 is not set"
+  else
+    log "${1}: ${!1}"
+  fi
+}
+
+function require_folder_exists() {
+  if [[ ! -d "${1}" ]]; then
+    fail_with_message "the folder at ${1} does not exist"
+  else
+    log "ls ${1}"; ls "${1}"
+  fi
+}
+
 
 log "pwd: $(pwd)"
+log "ls"; ls
+log
 
 
-if [[ -z "${ANDROID_SDK}" ]]; then
-  fail_with_message "ANDROID_SDK environment variable is unset"
-fi
-log "\${ANDROID_SDK}: ${ANDROID_SDK}"
-log "ls ${ANDROID_SDK}"; ls "${ANDROID_SDK}"
-if [[ -z "${ANDROID_NDK}" ]]; then
-  fail_with_message "ANDROID_NDK environment variable is unset"
-fi
-log "\${ANDROID_NDK}: ${ANDROID_NDK}"
-log "ls \${ANDROID_NDK}:"; ls "${ANDROID_NDK}"
+require_environment_variable ANDROID_SDK
+require_folder_exists "${ANDROID_SDK}"
+require_environment_variable JAVA_HOME
+require_folder_exists "${JAVA_HOME}"
 log
 
 
 log "Write local.properties file"
 echo "sdk.dir=${ANDROID_SDK}" > local.properties
-echo "ndk.dir=${ANDROID_NDK}" >> local.properties
 log "cat local.properties"; cat local.properties
 log
 
 
-if [[ -z "${JAVA_HOME}" ]]; then
-  fail_with_message "JAVA_HOME environment variable is unset. It should be set to a Java 8 SDK (in order for the license acceptance to work)"
-fi
-log "\${JAVA_HOME}: ${JAVA_HOME}"
-log "ls \${JAVA_HOME}:"; ls "${JAVA_HOME}"
-log "java -version:"; java -version
-log "javac -version:"; javac -version
-log
-
-
-log "Accept SDK licenses"
-log "${ANDROID_SDK}"/tools/bin/sdkmanager --licenses; yes | "${ANDROID_SDK}"/tools/bin/sdkmanager --licenses
-ACCEPT_SDK_LICENSES_EXIT_CODE=$?
-log
-if [[ $ACCEPT_SDK_LICENSES_EXIT_CODE -ne 0 ]]; then
-  fail_with_message "Build Error: SDK license acceptance failed. This can happen if your JAVA_HOME is not set to Java 8"
-fi
-
-
-# Having compileSdkVersion=31 leads to javac error "unrecognized Attribute name MODULE (class com.sun.tools.javac.util.UnsharedNameTable$NameImpl)"; switching to Java 11 fixes this problem.
-sudo update-java-alternatives --set java-1.11.0-openjdk-amd64
-export JAVA_HOME=/usr/lib/jvm/java-1.11.0-openjdk-amd64
-log "\${JAVA_HOME}: ${JAVA_HOME}"
-log "ls \${JAVA_HOME}:"; ls "${JAVA_HOME}"
-log "java -version:"; java -version
-log "javac -version:"; javac -version
-log
-
-
+# Download the gradle binary at the version set atop this file
 GRADLE_ZIP_REMOTE_FILE=gradle-${GRADLE_DOWNLOAD_VERSION}-bin.zip
-GRADLE_ZIP_DEST_PATH=~/Desktop/${GRADLE_DOWNLOAD_VERSION}.zip
+GRADLE_ZIP_DEST_PATH=~/${GRADLE_DOWNLOAD_VERSION}.zip
 log "Download gradle binary from the web ${GRADLE_ZIP_REMOTE_FILE} to ${GRADLE_ZIP_DEST_PATH} using wget"
-wget -O ${GRADLE_ZIP_DEST_PATH} https://services.gradle.org/distributions/${GRADLE_ZIP_REMOTE_FILE}
+time wget -O ${GRADLE_ZIP_DEST_PATH} https://services.gradle.org/distributions/${GRADLE_ZIP_REMOTE_FILE}
 log
 
 
+# Unzip the gradle binary
 GRADLE_UNZIP_HOSTING_FOLDER=/opt/gradle-${GRADLE_DOWNLOAD_VERSION}
 log "Unzip gradle zipfile ${GRADLE_ZIP_DEST_PATH} to ${GRADLE_UNZIP_HOSTING_FOLDER}"
 sudo unzip -n -d ${GRADLE_UNZIP_HOSTING_FOLDER} ${GRADLE_ZIP_DEST_PATH}
-log
-
-
 GRADLE_BINARY=${GRADLE_UNZIP_HOSTING_FOLDER}/gradle-${GRADLE_DOWNLOAD_VERSION}/bin/gradle
 log "\${GRADLE_BINARY} = ${GRADLE_BINARY}"
 log "\${GRADLE_BINARY} -version"
 ${GRADLE_BINARY} -version
-log "Obtain gradle/wrapper/ with gradle wrapper --gradle-version ${GRADLE_DOWNLOAD_VERSION}"
-${GRADLE_BINARY} wrapper --gradle-version ${GRADLE_DOWNLOAD_VERSION}
 log
 
 
-log "find gradle"
-find gradle
-log "gradlew --version"
-./gradlew --version
-log
-
-
-GRADLEW_DEBUG=
-GRADLEW_STACKTRACE=
 if [[ "$GRADLE_TRACE" = true ]]; then
-  GRADLEW_DEBUG=--debug
-  GRADLEW_STACKTRACE=--stacktrace
+  log "${GRADLE_BINARY} dependencies"
+  ${GRADLE_BINARY} dependencies
+  log
 fi
-log "./gradlew assembleDebug"
-chmod 777 gradlew
-./gradlew ${GRADLEW_DEBUG} ${GRADLEW_STACKTRACE} assemble
+
+
+GRADLE_DEBUG=
+GRADLE_STACKTRACE=
+if [[ "$GRADLE_TRACE" = true ]]; then
+  GRADLE_DEBUG=--debug
+  GRADLE_STACKTRACE=--stacktrace
+fi
+log "${GRADLE_BINARY} assembleDebug"
+${GRADLE_BINARY} ${GRADLE_DEBUG} ${GRADLE_STACKTRACE} assembleDebug
 BUILD_EXIT_CODE=$?
 log
+
 
 if [[ $BUILD_EXIT_CODE -eq 0 ]]; then
   log "find . -name *.apk"

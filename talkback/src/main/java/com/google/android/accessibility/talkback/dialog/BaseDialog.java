@@ -22,15 +22,19 @@ import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRAC
 import android.content.Context;
 import android.content.DialogInterface;
 import android.text.TextUtils;
+import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.view.WindowManager;
 import androidx.annotation.Nullable;
 import com.google.android.accessibility.talkback.Feedback;
 import com.google.android.accessibility.talkback.Pipeline.FeedbackReturner;
+import com.google.android.accessibility.talkback.R;
 import com.google.android.accessibility.talkback.TalkBackService;
-import com.google.android.accessibility.utils.A11yAlertDialogWrapper;
+import com.google.android.accessibility.utils.FormFactorUtils;
+import com.google.android.accessibility.utils.material.A11yAlertDialogWrapper;
 import com.google.android.accessibility.utils.widget.DialogUtils;
 import com.google.android.libraries.accessibility.utils.log.LogUtils;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 
 /**
  * This is a base class to handle show, dismiss and click events from dialogs. If the context is
@@ -43,15 +47,17 @@ public abstract class BaseDialog {
 
   protected final Context context;
   private final int dialogTitleResId;
+  @Nullable private String dialogTitle;
   @Nullable private A11yAlertDialogWrapper dialog;
   @Nullable private FeedbackReturner pipeline;
   private boolean isSoftInputMode = false;
   private boolean needToRestoreFocus = false;
+  private boolean includeNegativeButton = true;
   private int positiveButtonStringRes;
   private int negativeButtonStringRes;
   private int neutralButtonStringRes;
 
-  public BaseDialog(Context context, int dialogTitleResId, FeedbackReturner pipeline) {
+  public BaseDialog(Context context, int dialogTitleResId, @Nullable FeedbackReturner pipeline) {
     this.context = context;
     this.dialogTitleResId = dialogTitleResId;
     this.pipeline = pipeline;
@@ -85,6 +91,11 @@ public abstract class BaseDialog {
 
   ////////////////////////////////////////////////////////////////////////////
   // Optional setter for dialog
+
+  /** Sets the dialog title to the given text. */
+  public void setTitle(String title) {
+    dialogTitle = title;
+  }
 
   /**
    * Enables the button on the dialog.
@@ -141,6 +152,17 @@ public abstract class BaseDialog {
     this.neutralButtonStringRes = res;
   }
 
+  public void setPipeline(@Nullable FeedbackReturner pipeline) {
+    this.pipeline = pipeline;
+  }
+
+  @CanIgnoreReturnValue
+  /** Sets cancel Button on the dialog depending on the boolean value. */
+  public BaseDialog setIncludeNegativeButton(boolean includeNegativeButton) {
+    this.includeNegativeButton = includeNegativeButton;
+    return this;
+  }
+
   ////////////////////////////////////////////////////////////////////////////
   // Status controller for dialog
 
@@ -160,24 +182,38 @@ public abstract class BaseDialog {
     final DialogInterface.OnDismissListener onDismissListener = dialog -> dismissDialogInternal();
 
     A11yAlertDialogWrapper.Builder dialogBuilder =
-        A11yAlertDialogWrapper.materialDialogBuilder(context)
-            .setTitle(dialogTitleResId)
-            .setNegativeButton(negativeButtonStringRes, onClickListener)
+        A11yAlertDialogWrapper.materialDialogBuilder(
+                new ContextThemeWrapper(context, R.style.A11yAlertDialogCustomViewTheme))
             .setPositiveButton(positiveButtonStringRes, onClickListener)
             .setOnDismissListener(onDismissListener)
             .setCancelable(true);
 
+    if (!TextUtils.isEmpty(dialogTitle)) {
+      dialogBuilder = dialogBuilder.setTitle(dialogTitle);
+    } else {
+      dialogBuilder = dialogBuilder.setTitle(dialogTitleResId);
+    }
+
+    if (includeNegativeButton) {
+      dialogBuilder = dialogBuilder.setNegativeButton(negativeButtonStringRes, onClickListener);
+    }
+
     if (neutralButtonStringRes != RESOURCE_ID_UNKNOWN) {
-      dialogBuilder.setNeutralButton(neutralButtonStringRes, onClickListener);
+      dialogBuilder = dialogBuilder.setNeutralButton(neutralButtonStringRes, onClickListener);
     }
 
     String message = getMessageString();
     if (!TextUtils.isEmpty(message)) {
-      dialogBuilder.setMessage(message);
+      dialogBuilder = dialogBuilder.setMessage(message);
     }
     View customizedView = getCustomizedView();
     if (customizedView != null) {
-      dialogBuilder.setView(customizedView);
+      dialogBuilder = dialogBuilder.setView(customizedView);
+
+      if (FormFactorUtils.getInstance().isAndroidWear()) {
+        // Support Wear rotary input
+        customizedView.requestFocus();
+      }
     }
 
     dialog = dialogBuilder.create();
@@ -194,7 +230,7 @@ public abstract class BaseDialog {
     }
     dialog.show();
 
-    registerServiceDialog();
+    registerServiceDialog(isSoftInputMode);
     return dialog;
   }
 
@@ -215,9 +251,9 @@ public abstract class BaseDialog {
   ////////////////////////////////////////////////////////////////////////////////
 
   /** Registers screen monitor for dialog. When the screen turns off, cancel dialog. */
-  private void registerServiceDialog() {
+  private void registerServiceDialog(boolean isSoftInputMode) {
     if (context instanceof TalkBackService) {
-      ((TalkBackService) context).registerDialog(dialog);
+      ((TalkBackService) context).registerDialog(dialog, isSoftInputMode);
     }
   }
 

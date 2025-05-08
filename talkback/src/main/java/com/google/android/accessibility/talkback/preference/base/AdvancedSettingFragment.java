@@ -15,21 +15,24 @@
  */
 package com.google.android.accessibility.talkback.preference.base;
 
+import static com.google.android.accessibility.talkback.focusmanagement.FocusProcessorForTapAndTouchExploration.DOUBLE_TAP;
+
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.format.DateFormat;
+import androidx.preference.ListPreference;
 import androidx.preference.Preference;
-import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.TwoStatePreference;
 import com.google.android.accessibility.talkback.R;
+import com.google.android.accessibility.talkback.RingerModeAndScreenMonitor;
 import com.google.android.accessibility.talkback.TalkBackService;
+import com.google.android.accessibility.talkback.focusmanagement.FocusProcessorForTapAndTouchExploration.TypingMethod;
+import com.google.android.accessibility.talkback.preference.base.PreferenceActionHelper.WebPage;
 import com.google.android.accessibility.talkback.speech.SpeakPasswordsManager;
-import com.google.android.accessibility.talkback.utils.RemoteIntentUtils;
-import com.google.android.accessibility.utils.FeatureSupport;
-import com.google.android.accessibility.utils.PreferenceSettingsUtils;
 import com.google.android.accessibility.utils.SharedPreferencesUtils;
 
 /** Fragment to display advanced settings. */
@@ -52,8 +55,39 @@ public class AdvancedSettingFragment extends TalkbackBaseFragment {
   @Override
   public void onResume() {
     super.onResume();
-    updateTalkBackShortcutStatus();
     updateTouchExplorationState();
+    updateTimeFeedbackFormatPreference();
+  }
+
+  private void updateTimeFeedbackFormatPreference() {
+    final ListPreference timeFeedbackFormatPref =
+        findPreference(getString(R.string.pref_time_feedback_format_key));
+    if (timeFeedbackFormatPref != null) {
+      timeFeedbackFormatPref.setSummaryProvider(preference -> getSummaryForTimeFeedbackFormat());
+    }
+  }
+
+  private String getSummaryForTimeFeedbackFormat() {
+    final Resources resources = getResources();
+    final String timeFeedbackFormat =
+        SharedPreferencesUtils.getStringPref(
+            prefs,
+            resources,
+            R.string.pref_time_feedback_format_key,
+            R.string.pref_time_feedback_format_default);
+    int timeFeedbackFormatType =
+        RingerModeAndScreenMonitor.prefValueToTimeFeedbackFormat(resources, timeFeedbackFormat);
+
+    switch (timeFeedbackFormatType) {
+      case RingerModeAndScreenMonitor.TIME_FEEDBACK_FORMAT_12_HOURS:
+        return getString(R.string.pref_time_feedback_format_entries_12_hour);
+      case RingerModeAndScreenMonitor.TIME_FEEDBACK_FORMAT_24_HOURS:
+        return getString(R.string.pref_time_feedback_format_entries_24_hour);
+      default:
+        return DateFormat.is24HourFormat(getContext())
+            ? getString(R.string.pref_time_feedback_format_entries_24_hour)
+            : getString(R.string.pref_time_feedback_format_entries_12_hour);
+    }
   }
 
   /**
@@ -70,7 +104,6 @@ public class AdvancedSettingFragment extends TalkbackBaseFragment {
    * and passwords will continue to be spoken. In M and below, hide this preference.
    */
   private void updateSpeakPasswordsPreference() {
-    if (FeatureSupport.useSpeakPasswordsServicePref()) {
       // Read talkback speak-passwords preference, with default to system preference.
       boolean speakPassValue = SpeakPasswordsManager.getAlwaysSpeakPasswordsPref(context);
       // Update talkback preference display to match read value.
@@ -80,13 +113,6 @@ public class AdvancedSettingFragment extends TalkbackBaseFragment {
       if (prefSpeakPasswords != null) {
         prefSpeakPasswords.setChecked(speakPassValue);
       }
-    } else {
-      // Hides audio category and speak-passwords preference
-      PreferenceSettingsUtils.hidePreference(
-          context, getPreferenceScreen(), R.string.pref_category_audio_key);
-      PreferenceSettingsUtils.hidePreference(
-          context, getPreferenceScreen(), R.string.pref_speak_passwords_without_headphones);
-    }
   }
 
   /**
@@ -119,15 +145,6 @@ public class AdvancedSettingFragment extends TalkbackBaseFragment {
     }
   }
 
-  private void updateTalkBackShortcutStatus() {
-    final TwoStatePreference preference =
-        (TwoStatePreference) findPreference(getString(R.string.pref_two_volume_long_press_key));
-    if (preference == null) {
-      return;
-    }
-    preference.setEnabled(TalkBackService.getInstance() != null || preference.isChecked());
-  }
-
   @Override
   public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
     super.onCreatePreferences(savedInstanceState, rootKey);
@@ -135,63 +152,41 @@ public class AdvancedSettingFragment extends TalkbackBaseFragment {
     context = getContext();
     prefs = SharedPreferencesUtils.getSharedPreferences(context);
 
-    // Link preferences to web-viewer.
+    // Link preferences to web-viewer. The behavior depends on the type of form factors.
     if (findPreference(getString(R.string.pref_policy_key)) != null) {
-      linkToWebPage(
+      PreferenceActionHelper.assignWebIntentToPreference(
           this,
           findPreference(getString(R.string.pref_policy_key)),
-          "http://www.google.com/policies/privacy/");
+          WebPage.WEB_PAGE_PRIVACY_POLICY);
     }
     if (findPreference(getString(R.string.pref_show_tos_key)) != null) {
-      linkToWebPage(
+      PreferenceActionHelper.assignWebIntentToPreference(
           this,
           findPreference(getString(R.string.pref_show_tos_key)),
-          "http://www.google.com/mobile/toscountry");
+          WebPage.WEB_PAGE_TERMS_OF_SERVICE);
     }
 
     updateSpeakPasswordsPreference();
 
-    Preference resumeTalkBack = findPreference(getString(R.string.pref_resume_talkback_key));
-    if (resumeTalkBack != null) {
-      resumeTalkBack.setOnPreferenceChangeListener(
+    Preference typingPreference = findPreference(getString(R.string.pref_typing_confirmation_key));
+    Preference longPressDuration =
+        findPreference(getString(R.string.pref_typing_long_press_duration_key));
+    // Disable the "pref_typing_long_press_duration_key" when "pref_typing_confirmation_key" is set
+    // as double-tap.
+    if (typingPreference != null && longPressDuration != null) {
+      @TypingMethod
+      int typingMethod =
+          SharedPreferencesUtils.getIntFromStringPref(
+              prefs,
+              getResources(),
+              R.string.pref_typing_confirmation_key,
+              R.string.pref_typing_confirmation_default);
+      longPressDuration.setEnabled(typingMethod != DOUBLE_TAP);
+      typingPreference.setOnPreferenceChangeListener(
           (preference, newValue) -> {
-            final String key = preference.getKey();
-            if (getString(R.string.pref_resume_talkback_key).equals(key)) {
-              final String oldValue =
-                  SharedPreferencesUtils.getStringPref(
-                      prefs,
-                      getResources(),
-                      R.string.pref_resume_talkback_key,
-                      R.string.pref_resume_talkback_default);
-              if (!newValue.equals(oldValue)) {
-                // Reset the suspend warning dialog when the resume
-                // preference changes.
-                SharedPreferencesUtils.putBooleanPref(
-                    prefs, getResources(), R.string.pref_show_suspension_confirmation_dialog, true);
-              }
-            }
+            longPressDuration.setEnabled(Integer.parseInt((String) newValue) != DOUBLE_TAP);
             return true;
           });
-    }
-  }
-
-  /**
-   * Assigns an URL intent to the preference. When clicking the preference, it would jump to URL.
-   *
-   * @param fragment PreferenceFragmentCompat to get context.
-   * @param preference Preference to send Intent
-   * @param url URL which launches web page
-   */
-  private static void linkToWebPage(
-      PreferenceFragmentCompat fragment, Preference preference, String url) {
-    if (fragment == null) {
-      return;
-    }
-
-    if (FeatureSupport.isWatch(fragment.getContext())) {
-      RemoteIntentUtils.assignWebIntentToPreference(fragment, preference, url);
-    } else {
-      PreferenceSettingsUtils.assignWebIntentToPreference(fragment, preference, url);
     }
   }
 }

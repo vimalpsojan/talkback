@@ -22,6 +22,7 @@ import android.os.Handler;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import androidx.annotation.Nullable;
+import com.google.android.accessibility.utils.Performance.EventId;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -34,7 +35,7 @@ class MultiFingerMultiTap extends GestureMatcher {
   // The target number of taps.
   final int mTargetTapCount;
   // The target number of fingers.
-  final int mTargetFingerCount;
+  final int targetFingerCount;
   // The acceptable distance between two taps of a finger.
   private int doubleTapSlop;
   private int doubleTapTimeout;
@@ -66,17 +67,17 @@ class MultiFingerMultiTap extends GestureMatcher {
       GestureMatcher.StateChangeListener listener) {
     super(gestureId, new Handler(context.getMainLooper()), listener);
     mTargetTapCount = taps;
-    mTargetFingerCount = fingers;
+    targetFingerCount = fingers;
     doubleTapSlop = ViewConfiguration.get(context).getScaledDoubleTapSlop() * fingers;
-    doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout();
-    tapTimeout = ViewConfiguration.getTapTimeout();
+    doubleTapTimeout = GestureConfiguration.DOUBLE_TAP_TIMEOUT_MS;
+    tapTimeout = targetFingerCount * ViewConfiguration.getTapTimeout();
     touchSlop = ViewConfiguration.get(context).getScaledTouchSlop() * fingers;
 
-    bases = new PointF[mTargetFingerCount];
+    bases = new PointF[targetFingerCount];
     for (int i = 0; i < bases.length; i++) {
       bases[i] = new PointF();
     }
-    excludedPointsForDownSlopChecked = new ArrayList<>(mTargetFingerCount);
+    excludedPointsForDownSlopChecked = new ArrayList<>(targetFingerCount);
     clear();
   }
 
@@ -94,7 +95,7 @@ class MultiFingerMultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onDown(MotionEvent event) {
+  protected void onDown(EventId eventId, MotionEvent event) {
     // Before the matcher state transit to completed,
     // Cancel when an additional down arrived after reaching the target number of taps.
     if (completedTapCount == mTargetTapCount) {
@@ -125,12 +126,15 @@ class MultiFingerMultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onUp(MotionEvent event) {
-    long timeDelta = event.getEventTime() - lastDownTime;
+  protected void onUp(EventId eventId, MotionEvent event) {
+    // Because this is a multi-finger gesture, we must have received ACTION_POINTER_UP before this
+    // so we calculate timeDelta relative to lastUpTime.
+    long timeDelta = event.getEventTime() - lastUpTime;
     if (timeDelta > tapTimeout) {
       cancelGesture(event);
       return;
     }
+    lastUpTime = event.getEventTime();
     final PointF nearest = findNearestPoint(event, touchSlop, false);
     if ((getState() == STATE_GESTURE_STARTED || getState() == STATE_CLEAR) && null != nearest) {
       // Increase current tap count when the user have all fingers lifted
@@ -148,7 +152,7 @@ class MultiFingerMultiTap extends GestureMatcher {
       }
       if (completedTapCount == mTargetTapCount) {
         // Done.
-        completeAfterDoubleTapTimeout(event);
+        completeAfterDoubleTapTimeout(eventId, event);
       }
     } else {
       // Either too many taps or nonsensical event stream.
@@ -157,15 +161,15 @@ class MultiFingerMultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onMove(MotionEvent event) {
+  protected void onMove(EventId eventId, MotionEvent event) {
     // Outside the touch slop
     if (null == findNearestPoint(event, touchSlop, false)) {
-      // cancelGesture(event);
+      cancelGesture(event);
     }
   }
 
   @Override
-  protected void onPointerDown(MotionEvent event) {
+  protected void onPointerDown(EventId eventId, MotionEvent event) {
     // Reset timeout to ease the use for some people
     // with certain impairments to get all their fingers down.
     long timeDelta = event.getEventTime() - lastDownTime;
@@ -177,7 +181,7 @@ class MultiFingerMultiTap extends GestureMatcher {
     final int currentFingerCount = event.getPointerCount();
     // Accept down only before target number of fingers are down
     // or the finger count is not more than target.
-    if ((currentFingerCount > mTargetFingerCount) || isTargetFingerCountReached) {
+    if ((currentFingerCount > targetFingerCount) || isTargetFingerCountReached) {
       isTargetFingerCountReached = false;
       cancelGesture(event);
       return;
@@ -192,7 +196,7 @@ class MultiFingerMultiTap extends GestureMatcher {
     if ((getState() == STATE_GESTURE_STARTED || getState() == STATE_CLEAR) && nearest != null) {
       // The user have all fingers down within the tap timeout since first finger down,
       // setting the timeout for fingers to be lifted.
-      if (currentFingerCount == mTargetFingerCount) {
+      if (currentFingerCount == targetFingerCount) {
         isTargetFingerCountReached = true;
       }
       // Update pointer location to nearest one as a new base for next slop check.
@@ -204,7 +208,7 @@ class MultiFingerMultiTap extends GestureMatcher {
   }
 
   @Override
-  protected void onPointerUp(MotionEvent event) {
+  protected void onPointerUp(EventId eventId, MotionEvent event) {
     // Accept up only after target number of fingers are down.
     if (!isTargetFingerCountReached) {
       cancelGesture(event);
@@ -214,7 +218,9 @@ class MultiFingerMultiTap extends GestureMatcher {
     if (getState() == STATE_GESTURE_STARTED || getState() == STATE_CLEAR) {
       // Needs more fingers lifted within the tap timeout
       // after reaching the target number of fingers are down.
-      long timeDelta = event.getEventTime() - lastDownTime;
+      // Calculate timeDelta relative to whichever baseline is most recent, lastUpTime or
+      // lastDownTime.
+      long timeDelta = event.getEventTime() - Math.max(lastDownTime, lastUpTime);
       if (timeDelta > tapTimeout) {
         cancelGesture(event);
         return;
@@ -228,7 +234,7 @@ class MultiFingerMultiTap extends GestureMatcher {
   @Override
   public String getGestureName() {
     final StringBuilder builder = new StringBuilder();
-    builder.append(mTargetFingerCount).append("-Finger ");
+    builder.append(targetFingerCount).append("-Finger ");
     if (mTargetTapCount == 1) {
       builder.append("Single");
     } else if (mTargetTapCount == 2) {

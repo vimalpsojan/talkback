@@ -17,22 +17,53 @@
 package com.google.android.accessibility.talkback;
 
 import android.app.Application;
+import android.os.SystemClock;
 
 /** Initialize and configures Primes to collect performance metrics. */
 public class PrimesController {
 
   /** Timer for measuring latency. */
-  public enum Timer {
+  public enum TimerAction {
     START_UP,
     GESTURE_EVENT,
+    KEY_EVENT,
+    DPAD_NAVIGATION,
+    TTS_DELAY,
     INITIAL_FOCUS_RESTORE,
     INITIAL_FOCUS_FOLLOW_INPUT,
-    INITIAL_FOCUS_FIRST_CONTENT
+    INITIAL_FOCUS_FIRST_CONTENT,
+    IMAGE_CAPTION_OCR_SUCCEED,
+    IMAGE_CAPTION_OCR_FAILED,
+    IMAGE_CAPTION_ICON_LABEL_SUCCEED,
+    IMAGE_CAPTION_ICON_LABEL_FAILED,
+    IMAGE_CAPTION_IMAGE_DESCRIPTION_SUCCEED,
+    IMAGE_CAPTION_IMAGE_DESCRIPTION_FAILED,
+    IMAGE_CAPTION_IMAGE_PROCESS_BLOCK_OVERLAY,
+    GEMINI_RESPONSE_LATENCY,
+    // This is only logged when the duration between the two requests is below the framework delay.
+    LATENCY_BETWEEN_SCREENSHOT_CAPTURE_REQUEST,
+
+    EVENT_BASED_HEARING_FEEDBACK,
+    EVENT_BASED_PERFORMING_ACTION,
+    GESTURE_EVENT_LATENCY,
+    TOUCH_CONTROLLER_STATE_CHANGE_LATENCY,
+    GEMINI_ON_DEVICE_RESPONSE_LATENCY
   }
 
   public void initialize(Application app) {}
 
-  public void startTimer(Timer timerString) {}
+  public void startTimer(TimerAction timerAction) {}
 
-  public void stopTimer(Timer timerString) {}
+  public void startTimer(TimerAction timerAction, String id) {}
+
+  public void stopTimer(TimerAction timerAction) {}
+
+
+  public void recordDuration(TimerAction timerAction, long startMs, long endMs) {}
+
+  public void recordDuration(TimerAction timerAction, long duration) {}
+
+  public long getTime() {
+    return SystemClock.uptimeMillis();
+  }
 }

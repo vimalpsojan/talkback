@@ -18,15 +18,15 @@ package com.google.android.accessibility.talkback;
 
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.google.android.accessibility.talkback.Feedback.Scroll;
-import com.google.android.accessibility.talkback.ScrollEventInterpreter.ScrollTimeout;
-import com.google.android.accessibility.talkback.actor.AutoScrollActor;
 import com.google.android.accessibility.utils.AccessibilityNode;
+import com.google.android.accessibility.utils.input.ScrollEventInterpreter.ScrollTimeout;
+import com.google.android.accessibility.utils.output.ScrollActionRecord;
 import javax.annotation.Generated;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 // This file is normally auto-generated using the @AutoValue processor.  But
 // that operation has been failing on the gradle-based build, so this file is
-// committed into version control for now.
+// committed into version control for now.  Also read go/talkback-for-p section on AutoValue.
 @Generated("com.google.auto.value.processor.AutoValueProcessor")
 final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
 
@@ -42,9 +42,11 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
 
   private final int nodeAction;
 
-  private final AutoScrollActor.AutoScrollRecord.@Nullable Source source;
+  private final @Nullable String source;
 
   private final ScrollTimeout timeout;
+
+  private final int autoScrollAttempt;
 
   private AutoValue_Feedback_Scroll(
       Feedback.Scroll.Action action,
@@ -53,8 +55,9 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
       @Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen,
       int userAction,
       int nodeAction,
-      AutoScrollActor.AutoScrollRecord.@Nullable Source source,
-      ScrollTimeout timeout) {
+      @Nullable String source,
+      ScrollTimeout timeout,
+      int autoScrollAttempt) {
     this.action = action;
     this.node = node;
     this.nodeCompat = nodeCompat;
@@ -63,6 +66,7 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
     this.nodeAction = nodeAction;
     this.source = source;
     this.timeout = timeout;
+    this.autoScrollAttempt = autoScrollAttempt;
   }
 
   @Override
@@ -85,7 +89,7 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
     return nodeToMoveOnScreen;
   }
 
-  @ScrollEventInterpreter.UserAction
+  @ScrollActionRecord.UserAction
   @Override
   public int userAction() {
     return userAction;
@@ -97,13 +101,18 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
   }
 
   @Override
-  public AutoScrollActor.AutoScrollRecord.@Nullable Source source() {
+  public @Nullable String source() {
     return source;
   }
 
   @Override
   public ScrollTimeout timeout() {
     return timeout;
+  }
+
+  @Override
+  public int autoScrollAttempt() {
+    return autoScrollAttempt;
   }
 
   @Override
@@ -132,6 +141,8 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
         + ", "
         + "timeout="
         + timeout
+        + "autoScrollAttempt="
+        + autoScrollAttempt
         + "}";
   }
 
@@ -187,8 +198,9 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
     private @Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen;
     private Integer userAction;
     private Integer nodeAction;
-    private AutoScrollActor.AutoScrollRecord.@Nullable Source source;
+    private @Nullable String source;
     private ScrollTimeout timeout;
+    private Integer autoScrollAttempt;
 
     Builder() {
     }
@@ -206,26 +218,14 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
       return this;
     }
     @Override
-    @Nullable AccessibilityNode node() {
-      return node;
-    }
-    @Override
     public Feedback.Scroll.Builder setNodeCompat(@Nullable AccessibilityNodeInfoCompat nodeCompat) {
       this.nodeCompat = nodeCompat;
       return this;
     }
     @Override
-    @Nullable AccessibilityNodeInfoCompat nodeCompat() {
-      return nodeCompat;
-    }
-    @Override
     public Feedback.Scroll.Builder setNodeToMoveOnScreen(@Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen) {
       this.nodeToMoveOnScreen = nodeToMoveOnScreen;
       return this;
-    }
-    @Override
-    @Nullable AccessibilityNodeInfoCompat nodeToMoveOnScreen() {
-      return nodeToMoveOnScreen;
     }
     @Override
     public Feedback.Scroll.Builder setUserAction(int userAction) {
@@ -237,8 +237,9 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
       this.nodeAction = nodeAction;
       return this;
     }
+
     @Override
-    public Feedback.Scroll.Builder setSource(AutoScrollActor.AutoScrollRecord.@Nullable Source source) {
+    public Feedback.Scroll.Builder setSource(@Nullable String source) {
       this.source = source;
       return this;
     }
@@ -250,7 +251,13 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
     }
 
     @Override
-    Feedback.Scroll autoBuild() {
+    public Scroll.Builder setAutoScrollAttempt(int autoScrollAttempt) {
+      this.autoScrollAttempt = autoScrollAttempt;
+      return this;
+    }
+
+    @Override
+    public Feedback.Scroll build() {
       String missing = "";
       if (this.action == null) {
         missing += " action";
@@ -264,6 +271,9 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
       if (this.timeout == null) {
         missing += " timeout";
       }
+      if (this.autoScrollAttempt == null) {
+        missing += " autoScrollAttempt";
+      }
       if (!missing.isEmpty()) {
         throw new IllegalStateException("Missing required properties:" + missing);
       }
@@ -275,7 +285,8 @@ final class AutoValue_Feedback_Scroll extends Feedback.Scroll {
           this.userAction,
           this.nodeAction,
           this.source,
-          this.timeout);
+          this.timeout,
+          this.autoScrollAttempt);
     }
   }
 

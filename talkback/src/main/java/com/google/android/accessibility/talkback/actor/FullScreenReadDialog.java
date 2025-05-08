@@ -17,7 +17,10 @@
 package com.google.android.accessibility.talkback.actor;
 
 import static com.google.android.accessibility.talkback.Feedback.ContinuousRead.Action.INTERRUPT;
+import static com.google.android.accessibility.talkback.Feedback.Focus.Action.MUTE_NEXT_FOCUS;
+import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
 
+import android.content.Context;
 import android.view.accessibility.AccessibilityEvent;
 import com.google.android.accessibility.talkback.Feedback;
 import com.google.android.accessibility.talkback.Pipeline;
@@ -27,6 +30,7 @@ import com.google.android.accessibility.talkback.dialog.BaseDialog;
 import com.google.android.accessibility.talkback.dialog.FirstTimeUseDialog;
 import com.google.android.accessibility.talkback.eventprocessor.EventState;
 import com.google.android.accessibility.utils.Performance.EventId;
+import com.google.android.accessibility.utils.SharedPreferencesUtils;
 
 /**
  * When entering continuous reading mode {@link FullScreenReadActor}, a user can see first-time-use
@@ -53,8 +57,10 @@ public class FullScreenReadDialog extends FirstTimeUseDialog {
         /* dialogTitleResId= */ R.string.dialog_title_continuous_reading_mode,
         /* dialogMainMessageResId= */ R.string.dialog_message_continuous_reading_mode,
         /* checkboxTextResId= */ R.string.always_show_this_message_label);
+    setIncludeNegativeButton(false);
   }
 
+  @Override
   public void setPipeline(Pipeline.FeedbackReturner pipeline) {
     this.pipeline = pipeline;
   }
@@ -78,6 +84,7 @@ public class FullScreenReadDialog extends FirstTimeUseDialog {
         .setFlag(EventState.EVENT_SKIP_WINDOWS_CHANGED_PROCESSING_AFTER_CURSOR_CONTROL);
     EventState.getInstance()
         .setFlag(EventState.EVENT_SKIP_WINDOW_STATE_CHANGED_PROCESSING_AFTER_CURSOR_CONTROL);
+    pipeline.returnFeedback(EVENT_ID_UNTRACKED, Feedback.focus(MUTE_NEXT_FOCUS));
     waitingForContentFocus = true;
   }
 
@@ -85,5 +92,18 @@ public class FullScreenReadDialog extends FirstTimeUseDialog {
   public void showDialogBeforeReading(EventId eventId) {
     pipeline.returnFeedback(eventId, Feedback.continuousRead(INTERRUPT));
     showDialog();
+  }
+
+  /**
+   * Remove the show dialog preference in previous talkback versions. This is useful when the dialog
+   * content changes and we want to show it again to all users, even when they previously chose not
+   * to show this dialog again.
+   *
+   * @param context The current context, usually it is TalkbackService.
+   */
+  public static void removeLegacyShowDialogPreference(Context context) {
+    SharedPreferencesUtils.remove(
+        SharedPreferencesUtils.getSharedPreferences(context),
+        context.getResources().getString(R.string.pref_show_continuous_reading_mode_dialog));
   }
 }

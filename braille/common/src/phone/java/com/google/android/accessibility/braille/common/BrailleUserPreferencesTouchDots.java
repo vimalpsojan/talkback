@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.google.android.accessibility.braille.common;
 
 import android.content.Context;
@@ -20,6 +21,7 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.PointF;
 import android.util.Size;
+import androidx.annotation.StringRes;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,9 +49,8 @@ public class BrailleUserPreferencesTouchDots {
     String pointsString =
         sharedPreferences.getString(
             context.getString(
-                isTableTop
-                    ? R.string.pref_brailleime_calibration_points_phone_tabletop
-                    : R.string.pref_brailleime_calibration_points_phone_screenaway),
+                getPhoneCalibrationPreferenceKey(
+                    isTableTop, BrailleUserPreferences.isCurrentActiveInputCodeEightDot(context))),
             "");
     try {
       return pointsStringToPoints(orientation, screenSize, pointsString);
@@ -71,9 +72,9 @@ public class BrailleUserPreferencesTouchDots {
           .edit()
           .putString(
               context.getString(
-                  isTableTop
-                      ? R.string.pref_brailleime_calibration_points_phone_tabletop
-                      : R.string.pref_brailleime_calibration_points_phone_screenaway),
+                  getPhoneCalibrationPreferenceKey(
+                      isTableTop,
+                      BrailleUserPreferences.isCurrentActiveInputCodeEightDot(context))),
               generateLayoutPointsString(points, orientation, screenSize))
           .apply();
     } catch (JSONException e) {
@@ -82,14 +83,16 @@ public class BrailleUserPreferencesTouchDots {
   }
 
   public static List<PointF> readLayoutPointsTablet(
-      Context context, SharedPreferences sharedPreferences, int orientation) throws ParseException {
+      Context context, SharedPreferences sharedPreferences, boolean isTabletop, int orientation)
+      throws ParseException {
     try {
       String pointsString =
           sharedPreferences.getString(
               context.getString(
-                  orientation == Configuration.ORIENTATION_PORTRAIT
-                      ? R.string.pref_brailleime_calibration_points_tablet_tabletop_portrait
-                      : R.string.pref_brailleime_calibration_points_tablet_tabletop_landscape),
+                  getTabletCalibrationPreferenceKey(
+                      isTabletop,
+                      orientation,
+                      BrailleUserPreferences.isCurrentActiveInputCodeEightDot(context))),
               "");
       List<PointF> points = new ArrayList<>();
       if (!pointsString.isEmpty()) {
@@ -104,6 +107,7 @@ public class BrailleUserPreferencesTouchDots {
   public static void writeLayoutPointsTablet(
       Context context,
       SharedPreferences sharedPreferences,
+      boolean isTabletop,
       int orientation,
       List<PointF> points,
       Size screenSize)
@@ -113,13 +117,53 @@ public class BrailleUserPreferencesTouchDots {
           .edit()
           .putString(
               context.getString(
-                  orientation == Configuration.ORIENTATION_PORTRAIT
-                      ? R.string.pref_brailleime_calibration_points_tablet_tabletop_portrait
-                      : R.string.pref_brailleime_calibration_points_tablet_tabletop_landscape),
+                  getTabletCalibrationPreferenceKey(
+                      isTabletop,
+                      orientation,
+                      BrailleUserPreferences.isCurrentActiveInputCodeEightDot(context))),
               generateLayoutPointsString(points, orientation, screenSize))
           .apply();
     } catch (JSONException e) {
       throw new ParseException(e.getMessage(), -1);
+    }
+  }
+
+  @StringRes
+  private static int getTabletCalibrationPreferenceKey(
+      boolean isTabletop, int orientation, boolean eightDot) {
+    if (eightDot) {
+      if (isTabletop) {
+        return orientation == Configuration.ORIENTATION_PORTRAIT
+            ? R.string.pref_brailleime_calibration_points_tablet_eightDot_tabletop_portrait
+            : R.string.pref_brailleime_calibration_points_tablet_eightDot_tabletop_landscape;
+      } else {
+        return orientation == Configuration.ORIENTATION_PORTRAIT
+            ? R.string.pref_brailleime_calibration_points_tablet_eightDot_screenaway_portrait
+            : R.string.pref_brailleime_calibration_points_tablet_eightDot_screenaway_landscape;
+      }
+    } else {
+      if (isTabletop) {
+        return orientation == Configuration.ORIENTATION_PORTRAIT
+            ? R.string.pref_brailleime_calibration_points_tablet_tabletop_portrait
+            : R.string.pref_brailleime_calibration_points_tablet_tabletop_landscape;
+      } else {
+        return orientation == Configuration.ORIENTATION_PORTRAIT
+            ? R.string.pref_brailleime_calibration_points_tablet_screenaway_portrait
+            : R.string.pref_brailleime_calibration_points_tablet_screenaway_landscape;
+      }
+    }
+  }
+
+  @StringRes
+  private static int getPhoneCalibrationPreferenceKey(boolean tabletop, boolean eightDot) {
+    if (eightDot) {
+      return tabletop
+          ? R.string.pref_brailleime_calibration_points_phone_eightDot_tabletop
+          : R.string.pref_brailleime_calibration_points_phone_eightDot_screenaway;
+    } else {
+      return tabletop
+          ? R.string.pref_brailleime_calibration_points_phone_tabletop
+          : R.string.pref_brailleime_calibration_points_phone_screenaway;
     }
   }
 

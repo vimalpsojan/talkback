@@ -16,22 +16,25 @@
 
 package com.google.android.accessibility.talkback.contextmenu;
 
-import static com.google.android.accessibility.talkback.Feedback.ContinuousRead.Action.START_AT_NEXT;
+import static com.google.android.accessibility.talkback.Feedback.ContinuousRead.Action.START_AT_CURSOR;
 import static com.google.android.accessibility.talkback.Feedback.ContinuousRead.Action.START_AT_TOP;
 import static com.google.android.accessibility.talkback.Feedback.DimScreen.Action.BRIGHTEN;
 import static com.google.android.accessibility.talkback.Feedback.DimScreen.Action.DIM;
 import static com.google.android.accessibility.talkback.Feedback.Speech.Action.COPY_SAVED;
 import static com.google.android.accessibility.talkback.Feedback.Speech.Action.REPEAT_SAVED;
 import static com.google.android.accessibility.talkback.Feedback.Speech.Action.SPELL_SAVED;
+import static com.google.android.accessibility.talkback.Feedback.UniversalSearch.Action.TOGGLE_SEARCH;
 import static com.google.android.accessibility.talkback.Feedback.VoiceRecognition.Action.START_LISTENING;
 import static com.google.android.accessibility.utils.Performance.EVENT_ID_UNTRACKED;
-import static com.google.android.accessibility.utils.PreferencesActivity.FRAGMENT_NAME;
+import static com.google.android.accessibility.utils.preference.PreferencesActivity.FRAGMENT_NAME;
 
 import android.content.Intent;
 import android.text.TextUtils;
 import android.view.MenuItem;
+import androidx.annotation.VisibleForTesting;
 import com.android.talkback.TalkBackPreferencesActivity;
 import com.google.android.accessibility.talkback.Feedback;
+import com.google.android.accessibility.talkback.Feedback.TriggerIntent.Action;
 import com.google.android.accessibility.talkback.Pipeline;
 import com.google.android.accessibility.talkback.R;
 import com.google.android.accessibility.talkback.TalkBackService;
@@ -82,7 +85,7 @@ public class ContextMenuItemClickProcessor {
         || (itemId == R.id.disable_dimming)
         || (itemId == R.id.screen_search)
         || (itemId == R.id.voice_commands)
-        || (itemId == R.id.pause_feedback);
+        || (itemId == R.id.braille_display_settings);
   }
 
   public boolean onMenuItemClicked(MenuItem menuItem) {
@@ -97,7 +100,7 @@ public class ContextMenuItemClickProcessor {
     if (itemId == R.id.read_from_top) {
       pipeline.returnFeedback(eventId, Feedback.continuousRead(START_AT_TOP));
     } else if (itemId == R.id.read_from_current) {
-      pipeline.returnFeedback(eventId, Feedback.continuousRead(START_AT_NEXT));
+      pipeline.returnFeedback(eventId, Feedback.continuousRead(START_AT_CURSOR));
     } else if (itemId == R.id.repeat_last_utterance) {
       pipeline.returnFeedback(
           eventId, Feedback.part().setSpeech(Feedback.Speech.create(REPEAT_SAVED)));
@@ -108,9 +111,8 @@ public class ContextMenuItemClickProcessor {
       pipeline.returnFeedback(
           eventId, Feedback.part().setSpeech(Feedback.Speech.create(COPY_SAVED)));
     } else if (itemId == R.id.verbosity) {
-      Intent intent = new Intent(service, TalkBackPreferencesActivity.class);
-      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-      intent.putExtra(FRAGMENT_NAME, VerbosityPrefFragment.getFragmentName());
+      Intent intent = createSettingsIntent();
+      intent.putExtra(FRAGMENT_NAME, VerbosityPrefFragment.class.getName());
       service.startActivity(intent);
     } else if (itemId == R.id.audio_ducking) {
       switchValueAndEcho(
@@ -128,9 +130,7 @@ public class ContextMenuItemClickProcessor {
           R.string.pref_vibration_key,
           R.bool.pref_vibration_default);
     } else if (itemId == R.id.talkback_settings) {
-      final Intent settingsIntent = new Intent(service, TalkBackPreferencesActivity.class);
-      settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-      settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+      final Intent settingsIntent = createSettingsIntent();
       service.startActivity(settingsIntent);
     } else if (itemId == R.id.tts_settings) {
       Intent ttsSettingsIntent = new Intent(TalkBackService.INTENT_TTS_SETTINGS);
@@ -142,16 +142,24 @@ public class ContextMenuItemClickProcessor {
     } else if (itemId == R.id.disable_dimming) {
       pipeline.returnFeedback(eventId, Feedback.dimScreen(BRIGHTEN));
     } else if (itemId == R.id.screen_search) {
-      service.getUniversalSearchManager().toggleSearch(eventId);
+      pipeline.returnFeedback(eventId, Feedback.universalSearch(TOGGLE_SEARCH));
     } else if (itemId == R.id.voice_commands) {
-        pipeline.returnFeedback(
-            eventId, Feedback.voiceRecognition(START_LISTENING, /* checkDialog= */ true));
-    } else if (itemId == R.id.pause_feedback) {
-      // Toggle talkback suspended state.
-      service.requestSuspendTalkBack(eventId);
+      pipeline.returnFeedback(
+          eventId, Feedback.voiceRecognition(START_LISTENING, /* checkDialog= */ true));
+    } else if (itemId == R.id.braille_display_settings) {
+      pipeline.returnFeedback(
+          eventId, Feedback.triggerIntent(Action.TRIGGER_BRAILLE_DISPLAY_SETTINGS));
     }
 
     return true;
+  }
+
+  @VisibleForTesting
+  protected Intent createSettingsIntent() {
+    final Intent settingsIntent = new Intent(service, TalkBackPreferencesActivity.class);
+    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+    return settingsIntent;
   }
 
   /**

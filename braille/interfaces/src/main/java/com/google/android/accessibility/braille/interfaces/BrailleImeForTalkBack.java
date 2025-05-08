@@ -13,7 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.google.android.accessibility.braille.interfaces;
+
+import com.google.android.accessibility.utils.input.CursorGranularity;
 
 /** Allows TalkBack to signal to BrailleIme. */
 public interface BrailleImeForTalkBack {
@@ -23,6 +26,21 @@ public interface BrailleImeForTalkBack {
   /** Callbacks when TalkBack state changes from inactive or suspended to active. */
   void onTalkBackResumed();
 
+  /** Returns whether braille keyboard is in full screen and touch interacting. */
+  boolean isTouchInteracting();
+
   /** Returns the callback of BrailleIme to BrailleDisplay. */
   BrailleImeForBrailleDisplay getBrailleImeForBrailleDisplay();
+
+  /** Callbacks when screen dimmed. */
+  void onScreenDim();
+
+  /** Callback when screen undimmed. */
+  void onScreenBright();
+
+  /** Returns whether the granularity is valid for editing. */
+  boolean isGranularityValid(CursorGranularity cursorGranularity);
+
+  /** Returns whether braille keyboard is activated. */
+  boolean isBrailleKeyboardActivated();
 }

@@ -13,16 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.google.android.accessibility.braille.interfaces;
 
-import androidx.annotation.Nullable;
+import android.accessibilityservice.AccessibilityService;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
+import com.google.android.accessibility.braille.interfaces.ScreenReaderActionPerformer.ScreenReaderAction;
 import com.google.android.accessibility.utils.FocusFinder;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 
 /** Exposes some TalkBack behavior to BrailleDisplay. */
 public interface TalkBackForBrailleDisplay {
+  /** Obtains the AccessibilityService. */
+  AccessibilityService getAccessibilityService();
+
   /** Performs specific actions for screen reader. */
-  boolean performAction(ScreenReaderAction action);
+  @CanIgnoreReturnValue
+  boolean performAction(ScreenReaderAction action, Object... arg);
+
+  /** Sets voice feedback state. */
+  boolean setVoiceFeedback(boolean enabled);
+
+  /** Gets voice feedback enabled status. */
+  boolean getVoiceFeedbackEnabled();
 
   /** Gets accessibility focus node. */
   AccessibilityNodeInfoCompat getAccessibilityFocusNode(boolean fallbackOnRoot);
@@ -39,40 +52,29 @@ public interface TalkBackForBrailleDisplay {
   /** Returns whether {@param AccessibilityNodeInfoCompat node} needs a label. */
   boolean needsLabel(AccessibilityNodeInfoCompat node);
 
-  /** Returns the callback of BrailleIme to BrailleDisplay. */
-  @Nullable
-  BrailleImeForBrailleDisplay getBrailleImeForBrailleDisplay();
+  /** Returns whether a label can be added for this {@param AccessibilityNodeInfoCompat}. */
+  boolean supportsLabel(AccessibilityNodeInfoCompat node);
 
-  /** Screen reader actions. */
-  public enum ScreenReaderAction {
-    NEXT_ITEM,
-    PREVIOUS_ITEM,
-    NEXT_LINE,
-    PREVIOUS_LINE,
-    SCROLL_FORWARD,
-    SCROLL_BACKWARD,
-    NAVIGATE_TO_TOP,
-    NAVIGATE_TO_BOTTOM,
-    ACTIVATE_CURRENT,
-    NEXT_SECTION,
-    PREVIOUS_SECTION,
-    CONTROL_NEXT,
-    CONTROL_PREVIOUS,
-    NEXT_LIST,
-    PREVIOUS_LIST,
-    SCREEN_SEARCH,
-    OPEN_TALKBACK_MENU,
-    GLOBAL_HOME,
-    GLOBAL_BACK,
-    GLOBAL_RECENTS,
-    GLOBAL_NOTIFICATIONS,
-    GLOBAL_QUICK_SETTINGS,
-    GLOBAL_ALL_APPS,
-  }
+  /** Returns keyboard status. */
+  boolean isOnscreenKeyboardActive();
+
+  /**
+   * Returns active onscreen keyboard window name.
+   *
+   * @return empty if window title is null.
+   */
+  CharSequence getOnScreenKeyboardName();
 
   /** Custom label actions. */
   enum CustomLabelAction {
     ADD_LABEL,
     EDIT_LABEL
   }
+
+  /** Switches the input method to braille keyboard. */
+  @CanIgnoreReturnValue
+  boolean switchInputMethodToBrailleKeyboard();
+
+  /** Switches to next input method. */
+  boolean switchToNextInputMethod();
 }

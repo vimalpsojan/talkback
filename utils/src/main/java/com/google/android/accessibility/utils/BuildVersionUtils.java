@@ -64,9 +64,18 @@ public class BuildVersionUtils {
     return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
   }
 
-  @ChecksSdkIntAtLeast(api = 32)
+  @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.S_V2)
+  public static boolean isAtLeastS2() {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2;
+  }
+
+  @ChecksSdkIntAtLeast(api = 33)
   public static boolean isAtLeastT() {
-    // Build.VERSION_CODES.TIRAMISU is not open-sourced yet.
-    return Build.VERSION.SDK_INT > Build.VERSION_CODES.S;
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+  }
+
+  @ChecksSdkIntAtLeast(api = 34)
+  public static boolean isAtLeastU() {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
   }
 }
