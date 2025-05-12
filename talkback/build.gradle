@@ -9,6 +9,7 @@ dependencies {
     implementation project(':brailleime')
     implementation project(':brailleinterfaces')
     implementation project(':brailledisplay')
+    implementation 'androidx.documentfile:documentfile:1.0.1'
 }
 
 def talkbackMainPermission = '"com.android.talkback.permission.TALKBACK"'
