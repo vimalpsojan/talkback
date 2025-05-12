@@ -69,7 +69,8 @@
         android:required="false" />
 
     <application
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:name="com.App">
 
         <receiver android:name="com.google.android.accessibility.talkback.BootReceiver"
             android:directBootAware="true"

@@ -24,6 +24,13 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 /** Handles logging formatted strings. */
 public class LogUtils {
 
+  private static FileHandler fileHandler = null;
+
+  public static void init() {
+    // Initialize the file handler.
+    fileHandler = FileHandler.getInstance();
+  }
+
   private LogUtils() {} // Not instantiable.
 
   /** Plug-in for custom printing complex objects, especially accessibility event & node. */
@@ -252,8 +259,14 @@ public class LogUtils {
     try {
       String message = String.format(Strings.nullToEmpty(format), args);
       if (throwable == null) {
+        if(fileHandler!=null){
+          fileHandler.log(prefixedTag,message);
+        }
         Log.println(priority, prefixedTag, message);
       } else {
+        if(fileHandler!=null){
+          fileHandler.log(prefixedTag,String.format("%s\n%s", message, Log.getStackTraceString(throwable)));
+        }
         Log.println(
             priority,
             prefixedTag,
