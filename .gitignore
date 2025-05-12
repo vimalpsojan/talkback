@@ -1,0 +1,16 @@
+/.idea/
+/.gradle/
+/braille/translate/.cxx/
+/local.properties
+/braille/translate/build/
+/braille/brailledisplay/build/
+/braille/brailleime/build/
+/braille/brailleimeanalytics/build/
+/braille/common/build/
+/braille/interfaces/build/
+/compositor/build/
+/proguard/build/
+/talkback/build/
+/uiunderstanding/build/
+/utils/build/
+/braille/translate/src/phone/res/raw/translationtables.zip
